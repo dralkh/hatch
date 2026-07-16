@@ -1,0 +1,46 @@
+{
+  "name": "hatchframe",
+  "version": "1.0.0",
+  "private": false,
+  "engines": {
+    "node": ">=22.13.0"
+  },
+  "scripts": {
+    "dev": "vite",
+    "build": "node scripts/ensure-cloudflare-config.mjs && node scripts/clean.mjs && vinext build && npm run validate:artifact",
+    "deploy": "npm run build && wrangler deploy --config dist/server/wrangler.json",
+    "start": "vinext start",
+    "test": "npm run typecheck && npm run build && node --test tests/*.test.mjs && npm run test:python",
+    "test:python": "python3 -m unittest discover -s tests -p 'test_*.py'",
+    "typecheck": "tsc -p tsconfig.app.json --noEmit && tsc -p tsconfig.worker.json --noEmit",
+    "cf-typegen": "wrangler types worker-configuration.d.ts --env-interface CloudflareEnv --include-runtime false",
+    "validate:artifact": "node scripts/validate-artifact.mjs",
+    "lint": "eslint . --ignore-pattern dist --ignore-pattern .next"
+  },
+  "dependencies": {
+    "fflate": "^0.8.2",
+    "next": "16.2.6",
+    "react": "19.2.6",
+    "react-dom": "19.2.6"
+  },
+  "devDependencies": {
+    "@cloudflare/vite-plugin": "1.45.0",
+    "@cloudflare/workers-types": "5.20260715.1",
+    "@tailwindcss/postcss": "4.2.1",
+    "@types/node": "22.19.19",
+    "@types/react": "19.2.14",
+    "@types/react-dom": "19.2.3",
+    "@vitejs/plugin-react": "6.0.2",
+    "@vitejs/plugin-rsc": "0.5.26",
+    "eslint": "9.39.4",
+    "eslint-config-next": "16.2.6",
+    "react-server-dom-webpack": "19.2.6",
+    "tailwindcss": "4.2.1",
+    "typescript": "5.9.3",
+    "vinext": "0.0.50",
+    "vite": "8.0.13",
+    "wrangler": "4.111.0"
+  },
+  "type": "module",
+  "displayName": "Hatch"
+}
