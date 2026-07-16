@@ -3,6 +3,21 @@
 Hatch follows [Semantic Versioning](https://semver.org/). The project is in
 public preview, so `0.x` releases may still change interfaces.
 
+## [0.3.0] - 2026-07-16
+
+### Added
+
+- Selectable OpenAI, xAI, OpenRouter and Google image-generation providers in
+  the web app, alongside fal and configured local engines.
+- Memory-only browser key entry plus optional runtime server secrets and model
+  overrides for every cloud provider.
+- A bounded, same-origin cloud proxy that normalizes provider generation and
+  reference-edit responses into Hatch's local processing pipeline.
+- Direct-browser ComfyUI and InvokeAI choices on the hosted site for engines
+  that explicitly allow the Hatch origin through CORS.
+- Memory-only local endpoint, bearer token, workflow and output-node controls,
+  while retaining the self-hosted Hatch server-proxy mode.
+
 ## [0.2.0] - 2026-07-16
 
 ### Added
@@ -44,5 +59,6 @@ public preview, so `0.x` releases may still change interfaces.
 - Queue lifecycle and generated-asset URLs are constrained before fetching.
 - Local engine tokens remain inside the CLI process.
 
+[0.3.0]: https://github.com/dralkh/hatch/releases/tag/v0.3.0
 [0.2.0]: https://github.com/dralkh/hatch/releases/tag/v0.2.0
 [0.1.0]: https://github.com/dralkh/hatch/releases/tag/v0.1.0

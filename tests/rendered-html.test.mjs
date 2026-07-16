@@ -31,6 +31,9 @@ test("renders the production Hatchframe application", async () => {
   assert.match(html, /81 transparent pixel frames/i);
   assert.match(html, /One idea/i);
   assert.match(html, /FLUX\.2 \[klein\] 9B/i);
+  for (const provider of ["OpenAI", "xAI", "OpenRouter", "Google"]) {
+    assert.match(html, new RegExp(`>${provider}<\\/button>`, "i"));
+  }
   assert.match(html, /ComfyUI/i);
   assert.match(html, /InvokeAI/i);
   assert.match(html, /src="\/art\/nibi-idle\.png"/i);

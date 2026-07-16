@@ -3,11 +3,17 @@
 import { strToU8, unzipSync, zipSync } from "fflate";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  CloudBrowserBackend,
+  DEFAULT_PROVIDERS,
+  DirectLocalBrowserBackend,
   FalBrowserBackend,
   LocalBrowserBackend,
   discoverProviders,
+  isCloudProviderId,
+  isHostedCloudProviderId,
   selectPreferredProvider,
   type BrowserGenerationBackend,
+  type CloudProviderId,
   type LocalProviderId,
   type ProviderId,
   type ProviderSummary,
@@ -101,6 +107,16 @@ const stylePrompts: Record<ArtStyle, string> = {
   toon: "soft pastel pixel art, carefully stepped pixel curves, six-color maximum palette, compact cute proportions, simple expressive face, hard clean edges, no realism, no 3D rendering, no gradients, no blur, no painterly texture",
   plush: "chunky low-resolution pixel art, large deliberate square pixel clusters, four-color maximum palette, tiny chibi proportions, bold readable silhouette, no realism, no 3D rendering, no gradients, no blur, no fabric texture",
 };
+
+const credentialFields: Record<CloudProviderId, { label: string; env: string; placeholder: string }> = {
+  fal: { label: "fal API key", env: "FAL_KEY", placeholder: "Paste an API-scoped fal key" },
+  openai: { label: "OpenAI API key", env: "OPENAI_API_KEY", placeholder: "Paste an OpenAI project API key" },
+  xai: { label: "xAI API key", env: "XAI_API_KEY", placeholder: "Paste an xAI API key" },
+  openrouter: { label: "OpenRouter API key", env: "OPENROUTER_API_KEY", placeholder: "Paste an OpenRouter API key" },
+  google: { label: "Google API key", env: "GOOGLE_API_KEY", placeholder: "Paste a Gemini API key" },
+};
+
+type LocalConnection = { direct: boolean; endpoint: string; token: string };
 
 const creatureWords = ["dragon", "hawk", "eagle", "bird", "fox", "cat", "kitten", "moth", "dog", "corgi", "wolf", "bear", "rabbit", "bunny", "otter", "frog", "turtle", "dinosaur", "griffin", "phoenix", "axolotl", "hamster", "slime"];
 const colorWords = ["cyan", "green", "lime", "teal", "blue", "red", "orange", "yellow", "purple", "violet", "pink", "white", "black", "gold", "silver"];
@@ -603,7 +619,7 @@ function isArtStyle(value: unknown): value is ArtStyle {
 }
 
 function isProviderId(value: unknown): value is ProviderId {
-  return value === "fal" || value === "comfyui" || value === "invoke";
+  return value === "fal" || value === "openai" || value === "xai" || value === "openrouter" || value === "google" || value === "comfyui" || value === "invoke";
 }
 
 function readJsonFile(bytes: Uint8Array, label: string): Record<string, unknown> {
@@ -859,12 +875,16 @@ export default function SpriteLab() {
   const packingCache = useRef<PackingCache | null>(null);
   const gameSectionRef = useRef<HTMLElement>(null);
   const importInputRef = useRef<HTMLInputElement>(null);
-  const [apiKey, setApiKey] = useState("");
-  const [providers, setProviders] = useState<ProviderSummary[]>([{ id: "fal", label: "fal" }]);
+  const [apiKeys, setApiKeys] = useState<Record<CloudProviderId, string>>({ fal: "", openai: "", xai: "", openrouter: "", google: "" });
+  const [providers, setProviders] = useState<ProviderSummary[]>(DEFAULT_PROVIDERS);
   const [provider, setProvider] = useState<ProviderId>("fal");
   const [workflowOverrides, setWorkflowOverrides] = useState<Record<LocalProviderId, WorkflowOverrides>>({
     comfyui: {},
     invoke: {},
+  });
+  const [localConnections, setLocalConnections] = useState<Record<LocalProviderId, LocalConnection>>({
+    comfyui: { direct: false, endpoint: "http://127.0.0.1:8188", token: "" },
+    invoke: { direct: false, endpoint: "http://127.0.0.1:9090", token: "" },
   });
   const [description, setDescription] = useState("A round mint moon-moth kitten named Nibi — tiny cream face, two lavender antennae, leaf-shaped wings, stubby paws, star-shaped tail tip, oversized friendly dark eyes");
   const [artStyle, setArtStyle] = useState<ArtStyle>("pixel");
@@ -885,7 +905,10 @@ export default function SpriteLab() {
   const canRetryPacking = stage === "error" && packingRetryAvailable;
   const enhancedBrief = useMemo(() => enhanceCharacterBrief(description), [description]);
   const selectedProvider = providers.find((candidate) => candidate.id === provider) || providers.at(-1) || { id: "fal", label: "fal" };
-  const localWorkflows = provider === "fal" ? undefined : workflowOverrides[provider];
+  const localWorkflows = provider === "comfyui" || provider === "invoke" ? workflowOverrides[provider] : undefined;
+  const localConnection = provider === "comfyui" || provider === "invoke" ? localConnections[provider] : undefined;
+  const directLocal = Boolean(localConnection && (!selectedProvider.serverConfigured || localConnection.direct));
+  const cloudApiKey = isCloudProviderId(provider) ? apiKeys[provider] : "";
 
   const selectPetForPlay = useCallback((pet: SavedPet, scroll = true) => {
     setPlayablePet({ ...pet, petUrl: URL.createObjectURL(pet.petBlob), hatchUrl: URL.createObjectURL(pet.hatchBlob) });
@@ -922,7 +945,7 @@ export default function SpriteLab() {
       setProviders(available);
       if (!providerTouched.current) setProvider(selectPreferredProvider(available));
     }).catch(() => {
-      if (!cancelled) setProviders([{ id: "fal", label: "fal" }]);
+      if (!cancelled) setProviders(DEFAULT_PROVIDERS);
     });
     return () => { cancelled = true; };
   }, []);
@@ -934,17 +957,26 @@ export default function SpriteLab() {
     }
   }, [playablePet]);
 
-  const requestExample = useMemo(() => provider === "fal" ? ({
-    provider: "fal",
-    submit: { method: "POST", url: "https://queue.fal.run/fal-ai/flux-2/klein/9b/edit", body: { image_urls: ["<anchor-url>"], prompt: pairPosePrompt(rows[0].phases[0], rows[0].phases[1], artStyle), image_size: { width: 1024, height: 512 }, num_inference_steps: 4, output_format: "png", num_images: 1 } },
-    poll: "GET the status_url returned by submit",
-    result: "GET the response_url returned by submit",
-  }) : ({
-    provider,
-    endpoint: "Configured on the Hatch server",
-    workflow: localWorkflows?.editName || (selectedProvider.serverWorkflows ? "server-mounted edit workflow" : "upload required"),
-    replacements: ["{{PROMPT}}", "{{NEGATIVE_PROMPT}}", "{{SEED}}", "{{WIDTH}}", "{{HEIGHT}}", "{{REFERENCE_IMAGE}}"],
-  }), [artStyle, localWorkflows?.editName, provider, selectedProvider.serverWorkflows]);
+  const requestExample = useMemo(() => {
+    if (provider === "fal") return {
+      provider: "fal",
+      submit: { method: "POST", url: "https://queue.fal.run/fal-ai/flux-2/klein/9b/edit", body: { image_urls: ["<anchor-url>"], prompt: pairPosePrompt(rows[0].phases[0], rows[0].phases[1], artStyle), image_size: { width: 1024, height: 512 }, num_inference_steps: 4, output_format: "png", num_images: 1 } },
+      poll: "GET the status_url returned by submit",
+      result: "GET the response_url returned by submit",
+    };
+    if (isHostedCloudProviderId(provider)) return {
+      provider,
+      model: selectedProvider.model,
+      hatchProxy: { method: "POST", url: `/api/cloud?provider=${provider}`, credential: "x-provider-key header or server environment", body: { kind: "edit", prompt: pairPosePrompt(rows[0].phases[0], rows[0].phases[1], artStyle), width: 1024, height: 512, reference: "<private-data-url>" } },
+    };
+    return {
+      provider,
+      connection: directLocal ? "Direct browser CORS request" : "Hatch server proxy",
+      endpoint: directLocal ? "Entered in this tab" : "Configured on the Hatch server",
+      workflow: localWorkflows?.editName || (!directLocal && selectedProvider.serverWorkflows ? "server-mounted edit workflow" : "upload required"),
+      replacements: ["{{PROMPT}}", "{{NEGATIVE_PROMPT}}", "{{SEED}}", "{{WIDTH}}", "{{HEIGHT}}", "{{REFERENCE_IMAGE}}"],
+    };
+  }, [artStyle, directLocal, localWorkflows?.editName, provider, selectedProvider.model, selectedProvider.serverWorkflows]);
 
   function registerCutout(cutout: Cutout): string {
     cutoutUrls.current.push(cutout.url);
@@ -960,6 +992,18 @@ export default function SpriteLab() {
     if (generationLock.current) return;
     providerTouched.current = true;
     setProvider(next);
+    setError("");
+  }
+
+  function setProviderApiKey(cloudProvider: CloudProviderId, value: string) {
+    setApiKeys((current) => ({ ...current, [cloudProvider]: value }));
+  }
+
+  function patchLocalConnection(localProvider: LocalProviderId, update: Partial<LocalConnection>) {
+    setLocalConnections((current) => ({
+      ...current,
+      [localProvider]: { ...current[localProvider], ...update },
+    }));
     setError("");
   }
 
@@ -999,13 +1043,20 @@ export default function SpriteLab() {
   }
 
   function generationBackend(): BrowserGenerationBackend {
-    if (provider === "fal") return new FalBrowserBackend(apiKey);
+    if (provider === "fal") return new FalBrowserBackend(apiKeys.fal);
+    if (isHostedCloudProviderId(provider)) return new CloudBrowserBackend(provider, apiKeys[provider]);
     const summary = providers.find((candidate) => candidate.id === provider);
     if (!summary) throw new Error(`${provider} is not configured on this Hatch server.`);
     const workflows = workflowOverrides[provider];
     const hasTextOverride = Boolean(workflows.text);
     const hasEditOverride = Boolean(workflows.edit);
     if (hasTextOverride !== hasEditOverride) throw new Error("Upload both the text and reference-edit workflow, or remove the partial override.");
+    const connection = localConnections[provider];
+    const useDirect = !summary.serverConfigured || connection.direct;
+    if (useDirect) {
+      if (!hasTextOverride) throw new Error(`Upload both ${summary.label} workflows for direct browser generation.`);
+      return new DirectLocalBrowserBackend(provider, { ...workflows, endpoint: connection.endpoint, token: connection.token });
+    }
     if (!hasTextOverride && !summary.serverWorkflows) throw new Error(`Upload both ${summary.label} workflows before generating.`);
     return new LocalBrowserBackend(provider, workflows);
   }
@@ -1175,7 +1226,9 @@ export default function SpriteLab() {
       setAnchorUrl(registerCutout(await removeChroma(canonicalUrl)));
       setDetail(backend.id === "fal"
         ? "Identity anchor ready for reference edits…"
-        : `Uploading the identity anchor to ${backend.id === "comfyui" ? "ComfyUI" : "InvokeAI"}…`);
+        : backend.id === "comfyui" || backend.id === "invoke"
+          ? `Uploading the identity anchor to ${backend.id === "comfyui" ? "ComfyUI" : "InvokeAI"}…`
+          : `Preparing the identity anchor for ${selectedProvider.label} edits…`);
       const canonicalReference = await backend.prepareReference(anchor);
       setStage("generating");
       setDetail("Generating exact two-pose motion pairs and one egg in parallel…");
@@ -1297,33 +1350,47 @@ export default function SpriteLab() {
               </button>
             ))}
           </div>
-          <p className="field-help">Local engines are preferred when this self-hosted Hatch server exposes one. The public site exposes fal only.</p>
+          <p className="field-help">Use a cloud API, connect this browser directly to ComfyUI or InvokeAI, or use a local engine configured on a self-hosted Hatch server.</p>
         </fieldset>
-        {provider === "fal" ? (
+        {isCloudProviderId(provider) ? (
           <div className="field-block">
-            <label htmlFor="fal-key">fal API key</label>
-            <div className="key-field"><span aria-hidden="true">◆</span><input id="fal-key" type="password" value={apiKey} onChange={(event) => setApiKey(event.target.value)} placeholder="Paste an API-scoped key" autoComplete="off" spellCheck="false" /></div>
-            <p className="field-help">Held only in page memory. {selectedProvider.serverCredential ? "This server already has FAL_KEY configured." : "Required because this server has no FAL_KEY."}</p>
+            <label htmlFor={`${provider}-key`}>{credentialFields[provider].label}</label>
+            <div className="key-field"><span aria-hidden="true">◆</span><input id={`${provider}-key`} type="password" value={cloudApiKey} onChange={(event) => setProviderApiKey(provider, event.target.value)} placeholder={credentialFields[provider].placeholder} autoComplete="off" spellCheck="false" /></div>
+            <p className="field-help">Held only in page memory. {selectedProvider.serverCredential ? `This server already has ${credentialFields[provider].env} configured; a pasted key overrides it for this tab.` : `Paste a key here or configure ${credentialFields[provider].env} on the server.`}</p>
           </div>
         ) : localWorkflows ? (
           <div className="field-block local-workflows">
-            <div className="provider-status"><b>{selectedProvider.label} is connected</b><span>{selectedProvider.serverWorkflows ? "Mounted workflow defaults are ready." : "Upload both workflow exports to continue."}</span></div>
+            <div className="provider-status"><b>{directLocal ? `Direct browser → ${selectedProvider.label}` : `${selectedProvider.label} via Hatch server`}</b><span>{directLocal ? "Your browser calls the engine endpoint using CORS." : selectedProvider.serverWorkflows ? "Mounted workflow defaults are ready." : "Upload both workflow exports to continue."}</span></div>
+            {selectedProvider.serverConfigured && localConnection && (
+              <div className="segmented connection-mode">
+                <button type="button" className={!localConnection.direct ? "active" : ""} disabled={busy} onClick={() => patchLocalConnection(provider, { direct: false })}>Hatch server</button>
+                <button type="button" className={localConnection.direct ? "active" : ""} disabled={busy} onClick={() => patchLocalConnection(provider, { direct: true })}>Direct browser</button>
+              </div>
+            )}
+            {directLocal && localConnection && (
+              <div className="direct-engine-fields">
+                <label className="output-node" htmlFor={`${provider}-endpoint`}>Engine endpoint</label>
+                <div className="key-field"><span aria-hidden="true">↗</span><input id={`${provider}-endpoint`} type="url" value={localConnection.endpoint} onChange={(event) => patchLocalConnection(provider, { endpoint: event.target.value })} placeholder={provider === "comfyui" ? "http://127.0.0.1:8188" : "http://127.0.0.1:9090"} autoComplete="off" spellCheck="false" /></div>
+                <label className="output-node" htmlFor={`${provider}-token`}>Bearer token <span>optional</span></label>
+                <div className="key-field"><span aria-hidden="true">◆</span><input id={`${provider}-token`} type="password" value={localConnection.token} onChange={(event) => patchLocalConnection(provider, { token: event.target.value })} placeholder="Held only in this tab" autoComplete="off" spellCheck="false" /></div>
+              </div>
+            )}
             <div className="workflow-grid">
               <label className="workflow-file">
                 <span>Text workflow</span>
                 <input type="file" accept=".json,application/json" disabled={busy} onChange={(event) => loadWorkflowFile(provider, "text", event.target.files?.[0])} />
-                <small>{localWorkflows.textName || (selectedProvider.serverWorkflows ? "Server default" : "Required")}</small>
+                <small>{localWorkflows.textName || (!directLocal && selectedProvider.serverWorkflows ? "Server default" : "Required")}</small>
               </label>
               <label className="workflow-file">
                 <span>Edit workflow</span>
                 <input type="file" accept=".json,application/json" disabled={busy} onChange={(event) => loadWorkflowFile(provider, "edit", event.target.files?.[0])} />
-                <small>{localWorkflows.editName || (selectedProvider.serverWorkflows ? "Server default" : "Required")}</small>
+                <small>{localWorkflows.editName || (!directLocal && selectedProvider.serverWorkflows ? "Server default" : "Required")}</small>
               </label>
             </div>
             <label className="output-node" htmlFor={`${provider}-output-node`}>Output node <span>optional</span></label>
             <div className="key-field"><span aria-hidden="true">#</span><input id={`${provider}-output-node`} type="text" value={localWorkflows.outputNode || ""} onChange={(event) => setLocalOutputNode(provider, event.target.value)} placeholder={selectedProvider.outputNodeConfigured ? "Using server default" : "Auto-detect first image"} autoComplete="off" spellCheck="false" /></div>
-            {(localWorkflows.text || localWorkflows.edit || localWorkflows.outputNode) && <button type="button" className="workflow-reset" disabled={busy} onClick={() => clearWorkflowOverrides(provider)}>{selectedProvider.serverWorkflows ? "Use server workflow defaults" : "Clear browser overrides"}</button>}
-            <p className="field-help">Workflow JSON stays in this tab and is sent only to your Hatch server. It is never saved in pet history or exports.</p>
+            {(localWorkflows.text || localWorkflows.edit || localWorkflows.outputNode) && <button type="button" className="workflow-reset" disabled={busy} onClick={() => clearWorkflowOverrides(provider)}>{!directLocal && selectedProvider.serverWorkflows ? "Use server workflow defaults" : "Clear browser workflows"}</button>}
+            <p className="field-help">{directLocal ? "Endpoint, token and workflow JSON stay in this tab. The engine must allow this site through CORS and your browser may request local-network permission." : "Workflow JSON stays in this tab and is sent only to your Hatch server."} Nothing here is saved in pet history or exports.</p>
           </div>
         ) : null}
         <div className="field-block">
@@ -1346,7 +1413,7 @@ export default function SpriteLab() {
           </div>
         </fieldset>
         <details className="advanced">
-          <summary>Advanced execution <span>{provider === "fal" ? "FLUX.2 [klein] 9B" : selectedProvider.label} + local alpha</span></summary>
+          <summary>Advanced execution <span>{selectedProvider.model || selectedProvider.label} + local alpha</span></summary>
           <div className="advanced-body">
             <label className="check-row"><input type="checkbox" checked={autoRetry} onChange={(event) => setAutoRetry(event.target.checked)} /><span><b>Retry a missing pose pair once</b><small>{provider === "fal" ? "Adds about $0.02 only when a two-pose segment fails." : `Runs one extra ${selectedProvider.label} job only when a pose pair fails.`}</small></span></label>
             <button type="button" className="copy-request" onClick={copyRequest}>{copied ? "Copied provider contract" : "Copy provider request example"}</button>
@@ -1357,7 +1424,7 @@ export default function SpriteLab() {
         ) : (
           <button className="generate-button" type="button" disabled={busy} onClick={generate}><span>{busy ? "Hatching your pet…" : "Generate full pet package"}</span><b aria-hidden="true">{busy ? "···" : "→"}</b></button>
         )}
-        <p className="cost-note">{provider === "fal" ? "Full no-retry run: 27 fal jobs, about $0.43 at listed FLUX pricing. " : `Full no-retry run: 27 jobs on your ${selectedProvider.label} engine; Hatch adds no generation charge. `}Small two-pose requests are deliberate: they reliably return exact counts. Alpha, mirroring, packing and all 24 hatch frames run in this browser.</p>
+        <p className="cost-note">{provider === "fal" ? "Full no-retry run: 27 fal jobs, about $0.43 at listed FLUX pricing. " : isHostedCloudProviderId(provider) ? `Full no-retry run: 27 ${selectedProvider.label} image API calls billed by that provider; Hatch adds no generation charge. ` : `Full no-retry run: 27 jobs on your ${selectedProvider.label} engine; Hatch adds no generation charge. `}Small two-pose requests are deliberate: they reliably return exact counts. Alpha, mirroring, packing and all 24 hatch frames run in this browser.</p>
       </section>
 
       <section className="lab-output" aria-label="Generated pet output">

@@ -90,6 +90,7 @@ export function configuredLocalProviders(env: Environment = process.env) {
     return [{
       id,
       label: id === "comfyui" ? "ComfyUI" : "InvokeAI",
+      serverConfigured: true,
       serverWorkflows: Boolean(config.textWorkflowPath && config.editWorkflowPath),
       outputNodeConfigured: Boolean(config.outputNode),
     }];
@@ -102,7 +103,7 @@ function endpointUrl(config: LocalProviderConfig, path: string) {
 
 function authHeaders(config: LocalProviderConfig, headers?: HeadersInit) {
   const output = new Headers(headers);
-  output.set("user-agent", "Hatchframe-Web/0.2.0");
+  output.set("user-agent", "Hatchframe-Web/0.3.0");
   if (config.token) output.set("authorization", `Bearer ${config.token}`);
   return output;
 }

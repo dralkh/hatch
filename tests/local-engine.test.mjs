@@ -13,7 +13,7 @@ import {
   submitWorkflow,
   uploadReference,
 } from "../app/local-engine.ts";
-import { LocalBrowserBackend, discoverProviders, selectPreferredProvider } from "../app/generation-client.ts";
+import { DirectLocalBrowserBackend, LocalBrowserBackend, discoverProviders, selectPreferredProvider } from "../app/generation-client.ts";
 
 const png = new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 0]);
 const comfyConfig = { id: "comfyui", endpoint: "http://127.0.0.1:8188" };
@@ -36,7 +36,7 @@ test("provider config exposes only configured capability flags", () => {
   const config = getLocalProviderConfig("comfyui", env);
   assert.equal(config.endpoint, "http://127.0.0.1:8188");
   assert.equal(config.token, "secret");
-  assert.deepEqual(configuredLocalProviders(env), [{ id: "comfyui", label: "ComfyUI", serverWorkflows: true, outputNodeConfigured: false }]);
+  assert.deepEqual(configuredLocalProviders(env), [{ id: "comfyui", label: "ComfyUI", serverConfigured: true, serverWorkflows: true, outputNodeConfigured: false }]);
   assert.throws(() => getLocalProviderConfig("invoke", { INVOKEAI_ENDPOINT: "file:///tmp/image" }), LocalEngineError);
 });
 
@@ -105,7 +105,56 @@ test("browser local backend normalizes the route lifecycle", async () => {
 });
 
 test("provider discovery prefers local engines and rejects non-PNG output", async () => {
-  const providers = await discoverProviders(async () => json({ providers: [{ id: "invoke", label: "InvokeAI" }, { id: "fal", label: "fal" }] }));
+  const providers = await discoverProviders(async () => json({ providers: [{ id: "invoke", label: "InvokeAI", serverConfigured: true }, { id: "fal", label: "fal" }] }));
   assert.equal(selectPreferredProvider(providers), "invoke");
+  assert.equal(selectPreferredProvider([{ id: "invoke", label: "InvokeAI", serverConfigured: false }, { id: "fal", label: "fal" }]), "fal");
   assert.throws(() => assertPng(new TextEncoder().encode("not an image")), /not a PNG/i);
+});
+
+test("direct browser backend calls a CORS-enabled ComfyUI without the Hatch proxy", async () => {
+  const calls = [];
+  const fetcher = async (url) => {
+    const target = String(url);
+    calls.push(target);
+    if (target.endsWith("/prompt")) return json({ prompt_id: "direct_1" });
+    if (target.endsWith("/history/direct_1")) return json({ direct_1: { outputs: { "9": { images: [{ filename: "direct.png" }] } } } });
+    if (target.includes("/view?")) return new Response(png, { headers: { "content-type": "image/png" } });
+    if (target.endsWith("/upload/image")) return json({ name: "anchor.png" });
+    return json({}, 404);
+  };
+  const originalCreateObjectURL = URL.createObjectURL;
+  URL.createObjectURL = () => "blob:direct";
+  try {
+    const backend = new DirectLocalBrowserBackend("comfyui", { endpoint: "http://127.0.0.1:8188", text: textWorkflow, edit: editWorkflow }, fetcher, 0);
+    const generated = await backend.generate({ kind: "text", prompt: "pet", width: 1024, height: 1024, seed: 1, onUpdate() {} });
+    assert.equal(generated.url, "blob:direct");
+    assert.equal(await backend.prepareReference(generated), "anchor.png");
+    assert.ok(calls.every((url) => url.startsWith("http://127.0.0.1:8188/")));
+  } finally {
+    URL.createObjectURL = originalCreateObjectURL;
+  }
+});
+
+test("direct browser backend calls a CORS-enabled InvokeAI without the Hatch proxy", async () => {
+  const calls = [];
+  const fetcher = async (url) => {
+    const target = String(url);
+    calls.push(target);
+    if (target.endsWith("/api/v1/queue/default/enqueue_batch")) return json({ item_ids: [7] }, 201);
+    if (target.endsWith("/api/v1/queue/default/i/7")) return json({ status: "completed", session: { results: { save: { image_name: "direct.png" } } } });
+    if (target.endsWith("/api/v1/images/i/direct.png/full")) return new Response(png, { headers: { "content-type": "image/png" } });
+    if (target.endsWith("/api/v1/images/upload")) return json({ image_name: "anchor.png" }, 201);
+    return json({}, 404);
+  };
+  const originalCreateObjectURL = URL.createObjectURL;
+  URL.createObjectURL = () => "blob:invoke-direct";
+  try {
+    const backend = new DirectLocalBrowserBackend("invoke", { endpoint: "http://127.0.0.1:9090", text: textWorkflow, edit: editWorkflow }, fetcher, 0);
+    const generated = await backend.generate({ kind: "text", prompt: "pet", width: 1024, height: 1024, seed: 1, onUpdate() {} });
+    assert.equal(generated.url, "blob:invoke-direct");
+    assert.equal(await backend.prepareReference(generated), "anchor.png");
+    assert.ok(calls.every((url) => url.startsWith("http://127.0.0.1:9090/")));
+  } finally {
+    URL.createObjectURL = originalCreateObjectURL;
+  }
 });

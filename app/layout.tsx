@@ -4,7 +4,7 @@ import "./globals.css";
 export const metadata: Metadata = {
   metadataBase: new URL("https://hatch.amayx.com/"),
   title: "Hatch — turn one idea into a living sprite pet",
-  description: "Generate a cute pixel-art pet with 57 runtime frames plus a transparent 24-frame hatch using FLUX.2, local alpha processing, deterministic packing and portable exports.",
+  description: "Generate a cute pixel-art pet with 57 runtime frames plus a transparent 24-frame hatch using your preferred cloud image API or local engine.",
   alternates: { canonical: "/" },
   openGraph: {
     type: "website",

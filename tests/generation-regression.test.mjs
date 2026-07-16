@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
+import { CloudBrowserBackend } from "../app/generation-client.ts";
 
 const source = await readFile(new URL("../app/sprite-lab.tsx", import.meta.url), "utf8");
 const gameSource = await readFile(new URL("../app/pet-game.tsx", import.meta.url), "utf8");
@@ -26,15 +27,47 @@ test("persists finished pets locally without persisting credentials", () => {
   assert.match(source, /indexedDB\.open\(HISTORY_DB/);
   assert.match(source, /savePetLocally\(saved\)/);
   assert.doesNotMatch(source, /localStorage\.setItem\([^\n]*apiKey/);
+  assert.doesNotMatch(source, /indexedDB[^\n]*(?:apiKey|apiKeys)/i);
   const savedPetType = source.match(/type SavedPet = \{([\s\S]*?)\n\};/)?.[1] || "";
   assert.doesNotMatch(savedPetType, /endpoint|token/i);
 });
 
-test("offers configured local providers without exposing their endpoints", () => {
+test("offers memory-only keys for all supported cloud image providers", () => {
+  assert.match(source, /openai: \{ label: "OpenAI API key"/);
+  assert.match(source, /xai: \{ label: "xAI API key"/);
+  assert.match(source, /openrouter: \{ label: "OpenRouter API key"/);
+  assert.match(source, /google: \{ label: "Google API key"/);
+  assert.match(source, /new CloudBrowserBackend\(provider, apiKeys\[provider\]\)/);
+  assert.match(source, /Held only in page memory/);
+});
+
+test("cloud providers call brand-checked browser fetch with the global object", async () => {
+  const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+  const browserFetch = function (input, init) {
+    assert.equal(this, globalThis);
+    assert.equal(input, "/api/cloud?provider=openai");
+    assert.equal(init.method, "POST");
+    return Promise.resolve(new Response(png, { headers: { "content-type": "image/png" } }));
+  };
+  const backend = new CloudBrowserBackend("openai", "", browserFetch);
+  const result = await backend.generate({
+    kind: "text",
+    prompt: "tiny mint test pet",
+    width: 1024,
+    height: 1024,
+    seed: 1,
+    onUpdate() {},
+  });
+  assert.equal(result.blob.type, "image/png");
+  URL.revokeObjectURL(result.url);
+});
+
+test("offers server-proxied and memory-only direct local providers", () => {
   assert.match(source, /discoverProviders\(\)/);
   assert.match(source, /selectPreferredProvider\(available\)/);
   assert.match(source, /new LocalBrowserBackend\(provider, workflows\)/);
-  assert.match(source, /Workflow JSON stays in this tab/);
+  assert.match(source, /new DirectLocalBrowserBackend\(provider/);
+  assert.match(source, /Endpoint, token and workflow JSON stay in this tab/);
 });
 
 test("renders every action as an animated preview and exposes the playable game", () => {

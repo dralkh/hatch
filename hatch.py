@@ -59,7 +59,7 @@ from pathlib import Path
 from typing import Any, Iterable, Sequence
 
 
-VERSION = "0.2.0"
+VERSION = "0.3.0"
 TEXT_MODEL = "fal-ai/flux-2/klein/9b"
 EDIT_MODEL = "fal-ai/flux-2/klein/9b/edit"
 CELL_W = 192

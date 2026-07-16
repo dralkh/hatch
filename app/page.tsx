@@ -10,6 +10,13 @@ const modelRows = [
     href: "https://fal.ai/models/fal-ai/flux-2/klein/9b/api",
   },
   {
+    role: "Cloud API paths",
+    models: "OpenAI · xAI · OpenRouter · Google",
+    fit: "Choose a provider in the page and use a tab-only key or a runtime server secret. Hatch normalizes each text and reference-edit response before local packing.",
+    price: "Provider billing",
+    href: "#lab",
+  },
+  {
     role: "Local path",
     models: "ComfyUI native API",
     fit: "hatch.py fills an exported API workflow, uploads the identity anchor, submits /prompt, polls history and retrieves the final image directly.",
@@ -52,7 +59,7 @@ const contract = [
   ["Cell", "192 × 208 px"],
   ["Runtime atlas", "1536 × 1872 px"],
   ["Hatch atlas", "1536 × 624 px"],
-  ["Engine cost", "fal ≈ $0.43 · local API $0"],
+  ["Engine cost", "Provider billing · local API $0"],
 ];
 
 export default function Home() {
@@ -92,7 +99,7 @@ export default function Home() {
             <a className="button quiet" href="#models">Choose hosted or local</a>
           </div>
           <div className="hero-proof" aria-label="Pipeline summary">
-            <div><strong>3</strong><span>engine paths</span></div>
+            <div><strong>7</strong><span>engine paths</span></div>
             <div><strong>81</strong><span>live frames</span></div>
             <div><strong>0</strong><span>video jobs</span></div>
           </div>
@@ -126,7 +133,7 @@ export default function Home() {
             <h2>One idea.<br />A complete living pet.</h2>
           </div>
           <p>
-            The hosted page keeps a fal key in memory only. The standalone Python workflow can instead talk directly to ComfyUI or InvokeAI on your own machine. Every path uses the same prompt hardening and deterministic atlas contract.
+            The hosted page keeps pasted fal, OpenAI, xAI, OpenRouter or Google keys in memory only. The standalone Python workflow can instead talk directly to ComfyUI or InvokeAI on your own machine. Every path uses the same prompt hardening and deterministic atlas contract.
           </p>
         </div>
         <SpriteLab />
@@ -155,7 +162,7 @@ export default function Home() {
 
         <div className="workflow-grid">
           <article className="workflow-card feature"><span className="card-index">01</span><h3>Clarify the creature</h3><p>Comma-separated animals become one hybrid. Color lists become primary and accent palettes. The prompt forbids separate creatures and repeated anatomy.</p></article>
-          <article className="workflow-card"><span className="card-index">02</span><h3>Lock identity once</h3><p>A square anchor defines anatomy, markings and camera. Every motion row and egg reuses the exact source image through fal, ComfyUI or InvokeAI.</p></article>
+          <article className="workflow-card"><span className="card-index">02</span><h3>Lock identity once</h3><p>A square anchor defines anatomy, markings and camera. Every motion row and egg reuses the exact source image through the selected cloud or local engine.</p></article>
           <article className="workflow-card"><span className="card-index">03</span><h3>Remove alpha locally</h3><p>A uniform magenta field is converted to soft transparency in the browser. Border sampling, despill and coverage checks reject unusable backgrounds.</p></article>
           <article className="workflow-card"><span className="card-index">04</span><h3>Pack, remember, play</h3><p>Exact cells and a coded hatch produce deterministic exports. IndexedDB keeps past pets on-device, while the action wall and three-zone adventure verify that every atlas moves.</p></article>
         </div>
@@ -174,9 +181,9 @@ export default function Home() {
         <div className="section-kicker">The engine stack</div>
         <div className="section-heading split-heading">
           <div><p className="section-number">03</p><h2>Bring a key.<br />Or bring a GPU.</h2></div>
-          <p>FLUX.2 [klein] 9B on fal remains the zero-setup web default. ComfyUI and InvokeAI users can run their own checkpoint through exported workflow templates and keep prompts, source images and model execution on their machine.</p>
+          <p>Choose fal, OpenAI, xAI, OpenRouter or Google with a memory-only browser key or server secret. ComfyUI and InvokeAI users can instead run their own checkpoint and keep model execution on their machine.</p>
         </div>
-        <div className="savings-banner"><strong>3 paths</strong><span>one exact sprite contract</span><p>fal hosted</p><i aria-hidden="true">·</i><p>ComfyUI / InvokeAI local</p></div>
+        <div className="savings-banner"><strong>7 paths</strong><span>one exact sprite contract</span><p>five cloud APIs</p><i aria-hidden="true">·</i><p>two local engines</p></div>
         <div className="model-table" role="table" aria-label="Hatch model workflow">
           <div className="model-row model-head" role="row"><span role="columnheader">Stage</span><span role="columnheader">Engine</span><span role="columnheader">Why it is here</span><span role="columnheader">Listed cost</span><span aria-hidden="true" /></div>
           {modelRows.map((row) => (
@@ -195,6 +202,10 @@ export default function Home() {
           <a href="https://fal.ai/models/fal-ai/flux-2/klein/9b/edit/api" target="_blank" rel="noreferrer"><span>FLUX.2 [klein] 9B Edit</span><b>Reference editing · fast four-step ↗</b></a>
           <a href="https://fal.ai/docs/documentation/model-apis/inference/queue" target="_blank" rel="noreferrer"><span>fal asynchronous inference</span><b>Lifecycle URLs + HTTP methods ↗</b></a>
           <a href="https://fal.ai/docs/documentation/model-apis/inference/proxy-setup" target="_blank" rel="noreferrer"><span>fal proxy setup</span><b>Server-side credential boundary ↗</b></a>
+          <a href="https://developers.openai.com/api/docs/guides/image-generation" target="_blank" rel="noreferrer"><span>OpenAI Image API</span><b>GPT Image generation + editing ↗</b></a>
+          <a href="https://docs.x.ai/developers/model-capabilities/images/generation" target="_blank" rel="noreferrer"><span>xAI Imagine API</span><b>Generation + reference editing ↗</b></a>
+          <a href="https://openrouter.ai/docs/guides/overview/multimodal/image-generation" target="_blank" rel="noreferrer"><span>OpenRouter Image API</span><b>Unified image models + references ↗</b></a>
+          <a href="https://ai.google.dev/gemini-api/docs/image-generation" target="_blank" rel="noreferrer"><span>Google Gemini Image API</span><b>Nano Banana generation + editing ↗</b></a>
           <a href="https://docs.comfy.org/development/comfyui-server/api-examples" target="_blank" rel="noreferrer"><span>ComfyUI Server API</span><b>Workflow export · prompt · history ↗</b></a>
           <a href="https://github.com/invoke-ai/InvokeAI/blob/main/docs/src/content/docs/development/Guides/workflow-api.mdx" target="_blank" rel="noreferrer"><span>InvokeAI Workflow Execution API</span><b>Graph queue · image output ↗</b></a>
         </div>
