@@ -1,6 +1,6 @@
 # Hatch
 
-<img width="3249" height="1738" alt="image" src="https://github.com/user-attachments/assets/459ba44e-5616-4261-90b2-b96bdea4ee16" />
+<img width="3223" height="1717" alt="image" src="https://github.com/user-attachments/assets/b40e1d56-8653-4835-8101-30d14638880a" />
 
 Hatch turns one creature description into a stable, transparent and
 playable pixel-pet package. It locks one character identity, generates small
