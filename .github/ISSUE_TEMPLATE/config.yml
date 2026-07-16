@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security vulnerability
+    url: https://github.com/dralkh/hatch/security/advisories/new
+    about: Report vulnerabilities privately instead of opening a public issue.
+  - name: Try Hatch
+    url: https://hatch.amayx.com/
+    about: Confirm the current behavior on the live website.

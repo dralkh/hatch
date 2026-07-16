@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import contextlib
+import io
 import json
 import sys
 import tempfile
@@ -12,6 +13,7 @@ import zipfile
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any, Iterator
+from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import hatch  # noqa: E402
@@ -163,6 +165,57 @@ class LocalBackendIntegrationTest(unittest.TestCase):
 
     def test_invokeai_native_queue_end_to_end(self) -> None:
         self._run_backend("invoke")
+
+
+class WorkflowContractTest(unittest.TestCase):
+    def test_workflow_placeholders_preserve_exact_value_types(self) -> None:
+        rendered = hatch._replace_workflow_values(
+            {
+                "seed": "{{SEED}}",
+                "width": "{{WIDTH}}",
+                "prompt": "prefix {{PROMPT}}",
+                "items": ["{{REFERENCE_IMAGE}}"],
+            },
+            {
+                "{{SEED}}": 42,
+                "{{WIDTH}}": 1024,
+                "{{PROMPT}}": "mint pet",
+                "{{REFERENCE_IMAGE}}": "anchor.png",
+            },
+        )
+        self.assertEqual(rendered["seed"], 42)
+        self.assertEqual(rendered["width"], 1024)
+        self.assertEqual(rendered["prompt"], "prefix mint pet")
+        self.assertEqual(rendered["items"], ["anchor.png"])
+
+    def test_bundle_builds_local_backend_without_network_access(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            bundle = Path(temporary) / "workflow.json"
+            bundle.write_text(json.dumps({"text": COMFY_TEXT, "edit": COMFY_EDIT}))
+            args = hatch.parser().parse_args(["--provider", "comfyui", "--workflow", str(bundle), "mint pet"])
+            backend = hatch.backend_from_args(args)
+        self.assertIsInstance(backend, hatch.ComfyUIBackend)
+        self.assertEqual(backend.endpoint, "http://127.0.0.1:8188")
+
+    def test_local_endpoint_rejects_embedded_credentials(self) -> None:
+        with self.assertRaisesRegex(hatch.HatchError, "must not contain credentials"):
+            hatch.ComfyUIBackend("http://user:secret@127.0.0.1:8188", COMFY_TEXT, COMFY_EDIT)
+
+    def test_fal_dry_run_does_not_require_or_spend_a_key(self) -> None:
+        output = io.StringIO()
+        with mock.patch.dict("os.environ", {}, clear=True), contextlib.redirect_stdout(output):
+            self.assertEqual(hatch.main(["--dry-run", "mint pet"]), 0)
+        self.assertIn('"normalPaidJobs": 27', output.getvalue())
+
+    def test_fal_backend_builds_anchor_and_edit_requests(self) -> None:
+        png = synthetic_png(False)
+        with mock.patch.object(hatch, "run_queued", return_value={"images": [{"url": "https://fal.media/test.png"}]}) as queued, mock.patch.object(hatch, "download_asset", return_value=png):
+            backend = hatch.FalBackend("secret")
+            anchor = backend.generate("anchor", 1024, 1024, 1, "anchor")
+            backend.generate("edit", 1024, 512, 2, "edit", anchor)
+        self.assertEqual(queued.call_args_list[0].args[1], hatch.TEXT_MODEL)
+        self.assertEqual(queued.call_args_list[1].args[1], hatch.EDIT_MODEL)
+        self.assertEqual(queued.call_args_list[1].args[2]["image_urls"], ["https://fal.media/test.png"])
 
 
 if __name__ == "__main__":

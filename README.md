@@ -1,6 +1,15 @@
 # Hatch
 
-<img width="3223" height="1717" alt="image" src="https://github.com/user-attachments/assets/b40e1d56-8653-4835-8101-30d14638880a" />
+[![CI](https://github.com/dralkh/hatch/actions/workflows/ci.yml/badge.svg)](https://github.com/dralkh/hatch/actions/workflows/ci.yml)
+[![Preview release](https://img.shields.io/github/v/release/dralkh/hatch?include_prereleases&label=preview)](https://github.com/dralkh/hatch/releases)
+[![License: MIT](https://img.shields.io/github/license/dralkh/hatch)](./LICENSE)
+[![Try Hatch](https://img.shields.io/badge/try-hatch.amayx.com-62f6ff)](https://hatch.amayx.com/)
+
+<a href="https://hatch.amayx.com/">
+  <img width="3223" height="1717" alt="Hatch web app showing the Nibi pixel pet generator, animation workflow and portable sprite output" src="https://github.com/user-attachments/assets/b40e1d56-8653-4835-8101-30d14638880a" />
+</a>
+
+**[Try Hatch live](https://hatch.amayx.com/)** or run the web app and standalone generator locally.
 
 Hatch turns one creature description into a stable, transparent and
 playable pixel-pet package. It locks one character identity, generates small
@@ -75,6 +84,15 @@ Set `-e PORT=8080` together with `-p 8080:8080` to use another port. The image
 runs the standalone production server as an unprivileged user and includes a
 health check.
 
+Preview releases are also published as public multi-platform images:
+
+```sh
+docker run --rm -p 3000:3000 ghcr.io/dralkh/hatch:0.1.0
+```
+
+Use the immutable version tag in production. The moving `preview` tag follows
+the newest `v0.x` release; Hatch will not publish a `latest` image before 1.0.
+
 The website's generation route is intentionally fal-only. Browsers cannot
 reliably call a user's loopback GPU service from an HTTPS deployment because
 of mixed-content, CORS and private-network protections. The standalone Python
@@ -84,6 +102,15 @@ path below connects to those engines directly without exposing them publicly.
 
 `hatch.py` is the alternative to using the site. It needs Python 3.10+ and has
 no third-party dependencies.
+
+Download the release-pinned command and its checksum from the
+[v0.1.0 release](https://github.com/dralkh/hatch/releases/tag/v0.1.0), or use
+the copy in this repository:
+
+```sh
+python3 hatch.py --version
+python3 hatch.py --self-test
+```
 
 ### fal
 
@@ -187,6 +214,17 @@ The test suite type-checks the app, builds the production Worker, validates the
 artifact, renders the page through the built Worker, checks proxy boundaries
 and guards the late-stage packing regression that previously caused the
 `startsWith` crash.
+
+## Releases and versioning
+
+Hatch uses Semantic Versioning for the app and CLI. Git tags are annotated and
+named `vMAJOR.MINOR.PATCH`; release tags are immutable, while `main` is the
+development branch. During the `v0.x` preview, interfaces may still evolve and
+GitHub releases are marked as prereleases.
+
+Each release provides source archives, the dependency-free `hatch.py` command,
+checksums and a matching `ghcr.io/dralkh/hatch` container image. See
+[CHANGELOG.md](./CHANGELOG.md) for user-visible changes.
 
 ## Security and privacy
 

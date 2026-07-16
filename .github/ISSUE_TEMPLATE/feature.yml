@@ -1,0 +1,35 @@
+name: Feature request
+description: Suggest an improvement to Hatch or its portable sprite contract.
+title: "[Feature]: "
+labels: [enhancement]
+body:
+  - type: dropdown
+    id: surface
+    attributes:
+      label: Area
+      options:
+        - Web experience
+        - Python CLI/provider
+        - Sprite package/runtime contract
+        - Beacon Rescue/game validation
+        - Documentation or deployment
+    validations:
+      required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem or use case
+      description: Describe the user need before proposing a particular implementation.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed outcome
+    validations:
+      required: true
+  - type: textarea
+    id: compatibility
+    attributes:
+      label: Compatibility considerations
+      description: Note any expected changes to atlases, manifests, CLI options, or imported packages.

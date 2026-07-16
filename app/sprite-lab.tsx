@@ -1304,7 +1304,14 @@ export default function SpriteLab() {
             return <div className={`job-row ${job.status}`} key={row.id}><span>{String(index + 1).padStart(2, "0")}</span><b>{row.label}</b><small>{job.detail}</small>{typeof job.score === "number" && <em>{job.score}</em>}</div>;
           })}
         </div>
-        {anchorUrl && <div className="anchor-chip"><img src={anchorUrl} alt="Generated canonical pet anchor" /><span><b>Identity anchor locked</b><small>Reused in every generated state</small></span></div>}
+        {/* The generated preview is a short-lived blob URL, so Next Image cannot optimize it. */}
+        {anchorUrl && (
+          <div className="anchor-chip">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src={anchorUrl} alt="Generated canonical pet anchor" />
+            <span><b>Identity anchor locked</b><small>Reused in every generated state</small></span>
+          </div>
+        )}
       </section>
     </div>
     <section className="playground-panel" ref={gameSectionRef} aria-labelledby="playground-heading">

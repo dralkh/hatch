@@ -1,7 +1,28 @@
 {
   "name": "hatchframe",
-  "version": "1.0.0",
-  "private": false,
+  "version": "0.1.0",
+  "private": true,
+  "description": "Generate consistent, transparent pixel-art pets from one prompt as portable, playable sprite packages.",
+  "homepage": "https://hatch.amayx.com/",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/dralkh/hatch.git"
+  },
+  "bugs": {
+    "url": "https://github.com/dralkh/hatch/issues"
+  },
+  "license": "MIT",
+  "keywords": [
+    "pixel-art",
+    "spritesheet",
+    "sprite-animation",
+    "generative-ai",
+    "comfyui",
+    "invokeai"
+  ],
+  "overrides": {
+    "postcss": "8.5.19"
+  },
   "engines": {
     "node": ">=22.13.0"
   },
@@ -15,7 +36,7 @@
     "typecheck": "tsc -p tsconfig.app.json --noEmit && tsc -p tsconfig.worker.json --noEmit",
     "cf-typegen": "wrangler types worker-configuration.d.ts --env-interface CloudflareEnv --include-runtime false",
     "validate:artifact": "node scripts/validate-artifact.mjs",
-    "lint": "eslint . --ignore-pattern dist --ignore-pattern .next"
+    "lint": "eslint . --ignore-pattern dist --ignore-pattern .next --max-warnings=0"
   },
   "dependencies": {
     "fflate": "^0.8.2",

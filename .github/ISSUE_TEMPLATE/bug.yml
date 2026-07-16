@@ -1,0 +1,66 @@
+name: Bug report
+description: Report a reproducible problem in the web app, CLI, export, or runtime.
+title: "[Bug]: "
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: Thanks for helping improve Hatch. Never include API keys, engine tokens, or private generated assets.
+  - type: dropdown
+    id: surface
+    attributes:
+      label: Affected surface
+      options:
+        - Live website
+        - Self-hosted website
+        - Python CLI — fal
+        - Python CLI — ComfyUI
+        - Python CLI — InvokeAI
+        - Exported sprite package/runtime
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: Release tag, container tag, commit SHA, or `python3 hatch.py --version` output.
+      placeholder: v0.1.0
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: Browser/OS, Node or Python version, and local engine version when relevant.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction steps
+      placeholder: |
+        1. Run …
+        2. Generate …
+        3. Observe …
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Sanitized logs or screenshots
+      description: Remove credentials, signed URLs, prompts, and private images before attaching anything.
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Safety checks
+      options:
+        - label: I removed credentials and private generated content.
+          required: true
+        - label: I searched existing issues for the same problem.
+          required: true
