@@ -1,6 +1,5 @@
 # Hatch
 
-[![CI](https://github.com/dralkh/hatch/actions/workflows/ci.yml/badge.svg)](https://github.com/dralkh/hatch/actions/workflows/ci.yml)
 [![Preview release](https://img.shields.io/github/v/release/dralkh/hatch?include_prereleases&label=preview)](https://github.com/dralkh/hatch/releases)
 [![License: MIT](https://img.shields.io/github/license/dralkh/hatch)](./LICENSE)
 [![Try Hatch](https://img.shields.io/badge/try-hatch.amayx.com-62f6ff)](https://hatch.amayx.com/)
@@ -45,6 +44,31 @@ stores completed packages in private IndexedDB history and includes a playable
 keyboard/touch mini-game. The latest 12 pets stay on-device, including imported
 Hatch ZIP packages, and each pet remembers its fastest Beacon Rescue clear
 plus three mastery badges.
+
+### Export for Hermes Agent
+
+Hatch's 1536×1872 runtime atlas already uses Hermes Agent's current petdex/Codex
+contract: an 8×9 grid of 192×208 cells with the same state rows and populated
+frame counts. No frame conversion or additional generation is required.
+
+On the website, choose **Hermes Agent ZIP** after generating a pet, or use the
+same action from a saved pet in local history. The Hermes archive contains only
+`pet.json` and `spritesheet.png`, which can be imported directly:
+
+```sh
+hermes pets import ./my-pet-hermes-pet.zip --select
+```
+
+The CLI defaults to the full Hatch package. Select the minimal Hermes archive,
+or emit both formats from the same generated frames:
+
+```sh
+python3 hatch.py --package-format hermes "a tiny cyan dragon-hawk"
+python3 hatch.py --package-format both "a tiny cyan dragon-hawk"
+```
+
+Hermes uses the runtime atlas and does not consume Hatch's separate 24-frame
+egg animation.
 
 ## Run the website
 
@@ -149,7 +173,7 @@ health check.
 Preview releases are also published as public multi-platform images:
 
 ```sh
-docker run --rm -p 3000:3000 ghcr.io/dralkh/hatch:0.4.0
+docker run --rm -p 3000:3000 ghcr.io/dralkh/hatch:0.5.0
 ```
 
 Use the immutable version tag in production. The moving `preview` tag follows
@@ -165,7 +189,7 @@ docker run --rm -p 3000:3000 \
   -e COMFYUI_ENDPOINT=http://host.docker.internal:8188 \
   -e COMFYUI_TEXT_WORKFLOW=/config/anchor-api.json \
   -e COMFYUI_EDIT_WORKFLOW=/config/edit-api.json \
-  ghcr.io/dralkh/hatch:0.4.0
+  ghcr.io/dralkh/hatch:0.5.0
 ```
 
 The public Cloudflare deployment at <https://hatch.amayx.com/> supports the
@@ -187,7 +211,7 @@ python3 -m pip install Pillow
 ```
 
 Download the release-pinned command and checksum from the
-[v0.4.0 release](https://github.com/dralkh/hatch/releases/tag/v0.4.0), or use
+[v0.5.0 release](https://github.com/dralkh/hatch/releases/tag/v0.5.0), or use
 the current copy in this repository:
 
 ```sh
@@ -305,6 +329,7 @@ python3 hatch.py --self-test
 python3 hatch.py --provider comfyui --dry-run "mint moth cat"
 python3 hatch.py --provider openrouter --dry-run "mint moth cat"
 python3 hatch.py --style plush --seed 8128 --out ./my-pet "round sprout frog"
+python3 hatch.py --package-format both "round sprout frog"
 ```
 
 ## Validation

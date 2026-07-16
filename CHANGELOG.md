@@ -3,6 +3,22 @@
 Hatch follows [Semantic Versioning](https://semver.org/). The project is in
 public preview, so `0.x` releases may still change interfaces.
 
+## [0.5.0] - 2026-07-16
+
+### Added
+
+- Hermes Agent-compatible sprite exports from both the website and standalone
+  CLI, using the current 8×9, 192×208-cell runtime atlas contract.
+- `--package-format hatch|hermes|both` for selecting full Hatch packages,
+  minimal Hermes imports or both archives from one generation.
+
+### Changed
+
+- Routine Dependabot update pull requests and general-purpose CI runs are
+  disabled; tagged and manually dispatched container publishing remains.
+- Container releases publish directly after checkout without the removed CI
+  validation dependency.
+
 ## [0.4.0] - 2026-07-16
 
 ### Added
@@ -70,6 +86,7 @@ public preview, so `0.x` releases may still change interfaces.
 - Queue lifecycle and generated-asset URLs are constrained before fetching.
 - Local engine tokens remain inside the CLI process.
 
+[0.5.0]: https://github.com/dralkh/hatch/releases/tag/v0.5.0
 [0.4.0]: https://github.com/dralkh/hatch/releases/tag/v0.4.0
 [0.3.0]: https://github.com/dralkh/hatch/releases/tag/v0.3.0
 [0.2.0]: https://github.com/dralkh/hatch/releases/tag/v0.2.0

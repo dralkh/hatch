@@ -1,6 +1,6 @@
 "use client";
 
-import { strToU8, unzipSync, zipSync } from "fflate";
+import { unzipSync } from "fflate";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   CloudBrowserBackend,
@@ -22,6 +22,7 @@ import {
 } from "./generation-client";
 import { GAME_LEVEL_VERSION, mergeGameRecord, type GameRecord, type GameResult } from "./game-engine";
 import BeaconGame from "./pet-game";
+import { buildHatchPackage, buildHermesPackage } from "./pet-packages";
 
 const CELL_W = 192;
 const CELL_H = 208;
@@ -586,34 +587,6 @@ function downloadBlob(blob: Blob, filename: string) {
   URL.revokeObjectURL(url);
 }
 
-function slugify(value: string) {
-  return value.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 42) || "sprite-pet";
-}
-
-function genericManifest(description: string) {
-  return {
-    schema: "sprite-pet/v1",
-    description,
-    assets: {
-      pet: { src: "spritesheet.png", width: PET_WIDTH, height: PET_HEIGHT, grid: { columns: 8, rows: 9, cellWidth: CELL_W, cellHeight: CELL_H } },
-      hatch: { src: "hatch.png", width: PET_WIDTH, height: HATCH_HEIGHT, grid: { columns: 8, rows: 3, cellWidth: CELL_W, cellHeight: CELL_H } },
-    },
-    pivot: { x: 96, y: 194 },
-    clips: {
-      hatch: { asset: "hatch", start: 0, count: 24, frameMs: 83, loop: false, next: "idle" },
-      idle: { asset: "pet", row: 0, count: 6, frameMs: 167, loop: true },
-      runRight: { asset: "pet", row: 1, count: 8, frameMs: 91, loop: true },
-      runLeft: { asset: "pet", row: 2, count: 8, frameMs: 91, loop: true },
-      wave: { asset: "pet", row: 3, count: 4, frameMs: 143, loop: false, next: "idle" },
-      jump: { asset: "pet", row: 4, count: 5, frameMs: 111, loop: false, next: "idle" },
-      failed: { asset: "pet", row: 5, count: 8, frameMs: 143, loop: false, next: "idle" },
-      waiting: { asset: "pet", row: 6, count: 6, frameMs: 200, loop: true },
-      work: { asset: "pet", row: 7, count: 6, frameMs: 111, loop: true },
-      review: { asset: "pet", row: 8, count: 6, frameMs: 167, loop: true },
-    },
-  };
-}
-
 function isArtStyle(value: unknown): value is ArtStyle {
   return value === "pixel" || value === "toon" || value === "plush";
 }
@@ -719,66 +692,13 @@ async function importPetPackage(file: File): Promise<SavedPet> {
   };
 }
 
-function portableRuntime() {
-  return `export class SpritePet {
-  constructor(canvas, manifest, base = ".") {
-    this.canvas = canvas; this.ctx = canvas.getContext("2d"); this.manifest = manifest; this.base = base;
-    this.images = {}; this.state = "idle"; this.started = performance.now(); this.raf = 0;
-  }
-  async load() {
-    for (const [id, asset] of Object.entries(this.manifest.assets)) {
-      const image = new Image(); image.src = new URL(asset.src, new URL(this.base, location.href)).href;
-      await image.decode(); this.images[id] = image;
-    }
-    this.play("hatch");
-  }
-  play(name) { this.state = name; this.started = performance.now(); cancelAnimationFrame(this.raf); this.tick(this.started); }
-  tick = (now) => {
-    const clip = this.manifest.clips[this.state]; const asset = this.manifest.assets[clip.asset]; const elapsed = now - this.started;
-    let frame = Math.floor(elapsed / clip.frameMs);
-    if (!clip.loop && frame >= clip.count) { this.play(clip.next || "idle"); return; }
-    frame %= clip.count; const absolute = clip.start == null ? clip.row * asset.grid.columns + frame : clip.start + frame;
-    const col = absolute % asset.grid.columns, row = Math.floor(absolute / asset.grid.columns);
-    this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
-    this.ctx.drawImage(this.images[clip.asset], col * asset.grid.cellWidth, row * asset.grid.cellHeight, asset.grid.cellWidth, asset.grid.cellHeight, 0, 0, this.canvas.width, this.canvas.height);
-    this.raf = requestAnimationFrame(this.tick);
-  }
-  destroy() { cancelAnimationFrame(this.raf); }
-}`;
-}
-
-function exampleHtml() {
-  return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>Sprite Pet</title><style>body{min-height:100vh;display:grid;place-items:center;background:#eef7fa}canvas{width:192px;height:208px;image-rendering:pixelated}</style></head><body><canvas id="pet" width="192" height="208"></canvas><script type="module">import {SpritePet} from './sprite-pet.js'; const manifest=await fetch('./manifest.json').then(r=>r.json()); const pet=new SpritePet(document.querySelector('#pet'),manifest); await pet.load(); window.pet=pet;</script></body></html>`;
-}
-
-async function buildPackageBlob(pet: SavedPet) {
-  const slug = slugify(pet.description);
-  const manifest = genericManifest(pet.description);
-  const petJson = {
-    id: slug,
-    displayName: pet.description.slice(0, 80),
-    description: pet.description,
-    ...(pet.artStyle ? { artStyle: pet.artStyle } : {}),
-    ...(pet.provider ? { provider: pet.provider } : {}),
-    createdAt: pet.createdAt,
-    spritesheetPath: "spritesheet.png",
-    createdBy: "Hatch",
-  };
-  const readme = `# ${pet.description}\n\nGenerated by Hatch.\n\n- spritesheet.png: app-ready 8×9 runtime atlas, 192×208 cells\n- hatch.png: 24-frame 8×3 one-shot hatch atlas\n- pet.json: portable pet identity metadata\n- manifest.json: app-agnostic animation contract\n- sprite-pet.js + index.html: dependency-free browser player\n\nServe this folder over HTTP and open index.html. Call window.pet.play('review'), window.pet.play('work'), or window.pet.play('hatch').\n`;
-  const zipped = zipSync({
-    "spritesheet.png": new Uint8Array(await pet.petBlob.arrayBuffer()),
-    "hatch.png": new Uint8Array(await pet.hatchBlob.arrayBuffer()),
-    "pet.json": strToU8(JSON.stringify(petJson, null, 2)),
-    "manifest.json": strToU8(JSON.stringify(manifest, null, 2)),
-    "sprite-pet.js": strToU8(portableRuntime()),
-    "index.html": strToU8(exampleHtml()),
-    "README.md": strToU8(readme),
-  }, { level: 6 });
-  return { blob: new Blob([zipped.buffer as ArrayBuffer], { type: "application/zip" }), filename: `${slug}-sprite-pet.zip` };
-}
-
 async function downloadPetPackage(pet: SavedPet) {
-  const output = await buildPackageBlob(pet);
+  const output = await buildHatchPackage(pet);
+  downloadBlob(output.blob, output.filename);
+}
+
+async function downloadHermesPetPackage(pet: SavedPet) {
+  const output = await buildHermesPackage(pet);
   downloadBlob(output.blob, output.filename);
 }
 
@@ -1449,6 +1369,7 @@ export default function SpriteLab() {
             <div className="download-row result-actions">
               <button type="button" className="play-now-button" onClick={() => selectPetForPlay(artifact)}>Play now <span>GAME</span></button>
               <button type="button" onClick={downloadPackage}>Portable package <span>ZIP</span></button>
+              <button type="button" onClick={() => downloadHermesPetPackage(artifact)}>Hermes Agent <span>ZIP</span></button>
               <button type="button" onClick={() => downloadBlob(artifact.petBlob, "spritesheet.png")}>Pet atlas <span>PNG</span></button>
               <button type="button" onClick={() => downloadBlob(artifact.hatchBlob, "hatch.png")}>Hatch atlas <span>PNG</span></button>
             </div>
@@ -1506,7 +1427,8 @@ export default function SpriteLab() {
               </div>
               <div className="history-card-actions">
                 <button type="button" className="history-play" onClick={() => selectPetForPlay(pet)}>Play</button>
-                <button type="button" onClick={() => downloadPetPackage(pet)}>Download</button>
+                <button type="button" onClick={() => downloadPetPackage(pet)}>Hatch ZIP</button>
+                <button type="button" onClick={() => downloadHermesPetPackage(pet)}>Hermes ZIP</button>
                 <button type="button" className="history-delete" onClick={() => handleDelete(pet)}>Delete</button>
               </div>
             </article>

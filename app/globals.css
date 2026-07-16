@@ -505,7 +505,7 @@ textarea:focus, .key-field:focus-within { border-color: var(--ink); box-shadow: 
 .history-card-copy h4 { min-height: 42px; margin: 7px 0 12px; display: -webkit-box; overflow: hidden; font-size: 14px; line-height: 1.45; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
 .history-card-copy p { margin: 0; color: #697871; font-size: 9px; }
 .history-card-copy p strong { color: var(--ink); font: 900 11px ui-monospace, SFMono-Regular, Menlo, monospace; }
-.history-card-actions { display: grid; grid-template-columns: 1fr 1fr auto; border-top: 2px solid #798980; }
+.history-card-actions { display: grid; grid-template-columns: 1fr 1fr 1fr auto; border-top: 2px solid #798980; }
 .history-card-actions button { min-height: 42px; padding: 0 10px; border: 0; border-right: 1px solid #9ba79f; background: transparent; color: var(--ink); font-size: 8px; font-weight: 900; }
 .history-card-actions button:last-child { border-right: 0; }
 .history-card-actions .history-play { background: var(--ink); color: var(--cyan); }

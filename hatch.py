@@ -62,11 +62,12 @@ from pathlib import Path
 from typing import Any, Iterable, Sequence
 
 
-VERSION = "0.4.0"
+VERSION = "0.5.0"
 TEXT_MODEL = "fal-ai/flux-2/klein/9b"
 EDIT_MODEL = "fal-ai/flux-2/klein/9b/edit"
 DIRECT_CLOUD_PROVIDERS = ("openai", "xai", "openrouter", "google")
 CLOUD_PROVIDERS = ("fal", *DIRECT_CLOUD_PROVIDERS)
+PACKAGE_FORMATS = ("hatch", "hermes", "both")
 CLOUD_SETTINGS = {
     "openai": ("OPENAI_API_KEY", "OPENAI_IMAGE_MODEL", "gpt-image-2"),
     "xai": ("XAI_API_KEY", "XAI_IMAGE_MODEL", "grok-imagine-image-quality"),
@@ -1780,7 +1781,10 @@ def write_package(
     seed: int,
     style: str,
     provider: str = "self-test",
-) -> Path:
+    package_format: str = "hatch",
+) -> tuple[Path, ...]:
+    if package_format not in PACKAGE_FORMATS:
+        raise HatchError(f"Unknown package format: {package_format}")
     output_dir.mkdir(parents=True, exist_ok=True)
     slug = slugify(description)
     manifest = manifest_for(description)
@@ -1825,11 +1829,26 @@ def write_package(
     }
     for name, content in files.items():
         (output_dir / name).write_bytes(content)
-    archive = output_dir.parent / f"{slug}-sprite-pet.zip"
-    with zipfile.ZipFile(archive, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=8) as zipped:
-        for name, content in files.items():
-            zipped.writestr(name, content)
-    return archive
+    archives: list[Path] = []
+    if package_format in ("hatch", "both"):
+        archive = output_dir.parent / f"{slug}-sprite-pet.zip"
+        with zipfile.ZipFile(archive, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=8) as zipped:
+            for name, content in files.items():
+                zipped.writestr(name, content)
+        archives.append(archive)
+    if package_format in ("hermes", "both"):
+        archive = output_dir.parent / f"{slug}-hermes-pet.zip"
+        hermes_meta = {
+            "id": slug,
+            "displayName": description[:80],
+            "description": description,
+            "spritesheetPath": "spritesheet.png",
+        }
+        with zipfile.ZipFile(archive, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=8) as zipped:
+            zipped.writestr("pet.json", json.dumps(hermes_meta, indent=2, ensure_ascii=False).encode())
+            zipped.writestr("spritesheet.png", files["spritesheet.png"])
+        archives.append(archive)
+    return tuple(archives)
 
 
 def dry_run(
@@ -1841,6 +1860,7 @@ def dry_run(
     auto_retry: bool,
     provider: str = "fal",
     model_override: str | None = None,
+    package_format: str = "hatch",
 ) -> None:
     if provider == "fal":
         models: dict[str, str] = {"anchor": TEXT_MODEL, "edits": EDIT_MODEL}
@@ -1863,6 +1883,7 @@ def dry_run(
         "seed": seed,
         "concurrency": concurrency,
         "autoRetryMissingPoses": auto_retry,
+        "packageFormat": package_format,
         "output": str(output),
         "anchorPrompt": character_prompt(description, style),
         "firstMotionPrompt": pair_pose_prompt(ROWS[0].phases[0], ROWS[0].phases[1], style),
@@ -1870,7 +1891,16 @@ def dry_run(
     print(json.dumps(plan, indent=2, ensure_ascii=False))
 
 
-def generate(description: str, style: str, output: Path, seed: int, concurrency: int, auto_retry: bool, backend: ImageBackend) -> Path:
+def generate(
+    description: str,
+    style: str,
+    output: Path,
+    seed: int,
+    concurrency: int,
+    auto_retry: bool,
+    backend: ImageBackend,
+    package_format: str = "hatch",
+) -> Path:
     progress("[1/4] Creating canonical identity anchor")
     canonical = backend.generate(character_prompt(description, style), 1024, 1024, seed, "Identity anchor")
     anchor_clean, anchor_transparency = _clean_generated(canonical, "Identity anchor")
@@ -1911,10 +1941,21 @@ def generate(description: str, style: str, output: Path, seed: int, concurrency:
     hatch_atlas = compose_hatch(egg, idle.frames[0])
 
     progress("[4/4] Writing portable runtime package")
-    archive = write_package(output, description, pet_atlas, hatch_atlas, assets, seed, style, backend.name)
+    archives = write_package(
+        output,
+        description,
+        pet_atlas,
+        hatch_atlas,
+        assets,
+        seed,
+        style,
+        backend.name,
+        package_format,
+    )
     progress(f"Ready: {output.resolve()}")
-    progress(f"ZIP:   {archive.resolve()}")
-    return archive
+    for archive in archives:
+        progress(f"ZIP:   {archive.resolve()}")
+    return archives[0]
 
 
 def self_test() -> None:
@@ -1962,12 +2003,28 @@ def self_test() -> None:
     if decode_png(encode_png(pet)).pixels != pet.pixels or decode_png(encode_png(hatch)).pixels != hatch.pixels:
         raise HatchError("Atlas PNG round-trip self-test failed.")
     with tempfile.TemporaryDirectory(prefix="hatchframe-self-test-") as temporary:
-        archive = write_package(Path(temporary) / "pet", "self-test pet", pet, hatch, assets, DEFAULT_SEED, "pixel")
-        with zipfile.ZipFile(archive) as zipped:
+        archives = write_package(
+            Path(temporary) / "pet",
+            "self-test pet",
+            pet,
+            hatch,
+            assets,
+            DEFAULT_SEED,
+            "pixel",
+            package_format="both",
+        )
+        hatch_archive, hermes_archive = archives
+        with zipfile.ZipFile(hatch_archive) as zipped:
             expected = {"spritesheet.png", "hatch.png", "pet.json", "manifest.json", "qa.json", "sprite-pet.js", "index.html", "README.md"}
             if set(zipped.namelist()) != expected:
                 raise HatchError("Portable package self-test failed.")
-    progress("Self-test passed: PNG, chroma, extraction, packing, hatch, manifest, runtime, and ZIP.")
+        with zipfile.ZipFile(hermes_archive) as zipped:
+            if set(zipped.namelist()) != {"pet.json", "spritesheet.png"}:
+                raise HatchError("Hermes package self-test failed.")
+            metadata = json.loads(zipped.read("pet.json"))
+            if metadata.get("spritesheetPath") != "spritesheet.png":
+                raise HatchError("Hermes package metadata self-test failed.")
+    progress("Self-test passed: PNG, chroma, extraction, packing, hatch, manifest, runtime, Hatch ZIP, and Hermes ZIP.")
 
 
 def _local_workflows(args: argparse.Namespace) -> tuple[dict[str, Any], dict[str, Any]]:
@@ -2042,6 +2099,12 @@ def parser() -> argparse.ArgumentParser:
     cli.add_argument("--concurrency", type=int, default=3, choices=range(1, 5), metavar="1-4", help="Maximum simultaneous engine jobs (default: 3)")
     cli.add_argument("--api-key", help="Selected cloud-provider key; the matching environment variable is safer")
     cli.add_argument("--model", help="Optional image model override for OpenAI, xAI, OpenRouter, or Google")
+    cli.add_argument(
+        "--package-format",
+        choices=PACKAGE_FORMATS,
+        default="hatch",
+        help="ZIP output: hatch, hermes, or both (default: hatch)",
+    )
     cli.add_argument("--no-retry", action="store_true", help="Do not retry a motion segment that omits a required pose")
     cli.add_argument("--dry-run", action="store_true", help="Print the complete model and local-processing plan without spending credits")
     cli.add_argument("--self-test", action="store_true", help="Run the full local image/export pipeline with synthetic inputs")
@@ -2073,7 +2136,17 @@ def main(argv: Sequence[str] | None = None) -> int:
         else:
             backend = backend_from_args(args)
         if args.dry_run:
-            dry_run(description, args.style, output, args.seed, args.concurrency, not args.no_retry, args.provider, args.model)
+            dry_run(
+                description,
+                args.style,
+                output,
+                args.seed,
+                args.concurrency,
+                not args.no_retry,
+                args.provider,
+                args.model,
+                args.package_format,
+            )
             return 0
     except HatchError as error:
         parser().error(str(error))
@@ -2081,7 +2154,16 @@ def main(argv: Sequence[str] | None = None) -> int:
     _cancelled.clear()
     old_sigint = signal.signal(signal.SIGINT, _signal_cancel)
     try:
-        generate(description, args.style, output, args.seed, args.concurrency, not args.no_retry, backend)
+        generate(
+            description,
+            args.style,
+            output,
+            args.seed,
+            args.concurrency,
+            not args.no_retry,
+            backend,
+            args.package_format,
+        )
         return 0
     except KeyboardInterrupt:
         progress("Cancelled. No API key or generated source URL was written to disk.")

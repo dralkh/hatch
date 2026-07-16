@@ -229,6 +229,15 @@ class WorkflowContractTest(unittest.TestCase):
         with mock.patch.dict("os.environ", {}, clear=True), contextlib.redirect_stdout(output):
             self.assertEqual(hatch.main(["--dry-run", "mint pet"]), 0)
         self.assertIn('"normalPaidJobs": 27', output.getvalue())
+        self.assertIn('"packageFormat": "hatch"', output.getvalue())
+
+    def test_dry_run_accepts_each_package_format(self) -> None:
+        for package_format in hatch.PACKAGE_FORMATS:
+            output = io.StringIO()
+            with mock.patch.dict("os.environ", {}, clear=True), contextlib.redirect_stdout(output):
+                status = hatch.main(["--dry-run", "--package-format", package_format, "mint pet"])
+            self.assertEqual(status, 0)
+            self.assertIn(f'"packageFormat": "{package_format}"', output.getvalue())
 
     def test_fal_backend_builds_anchor_and_edit_requests(self) -> None:
         png = synthetic_png(False)
