@@ -3,6 +3,17 @@
 Hatch follows [Semantic Versioning](https://semver.org/). The project is in
 public preview, so `0.x` releases may still change interfaces.
 
+## [0.4.0] - 2026-07-16
+
+### Added
+
+- Provider parity in `hatch.py` for OpenAI, xAI, OpenRouter and Google,
+  including automatic `.env` loading, model overrides and reference edits.
+- Bounded base64 response validation and PNG normalization for direct cloud
+  CLI output; xAI's JPEG output is converted with Pillow when selected.
+- Retry handling for cloud rate limits and transient provider failures during
+  the CLI's bounded-concurrency generation phase.
+
 ## [0.3.0] - 2026-07-16
 
 ### Added
@@ -59,6 +70,7 @@ public preview, so `0.x` releases may still change interfaces.
 - Queue lifecycle and generated-asset URLs are constrained before fetching.
 - Local engine tokens remain inside the CLI process.
 
+[0.4.0]: https://github.com/dralkh/hatch/releases/tag/v0.4.0
 [0.3.0]: https://github.com/dralkh/hatch/releases/tag/v0.3.0
 [0.2.0]: https://github.com/dralkh/hatch/releases/tag/v0.2.0
 [0.1.0]: https://github.com/dralkh/hatch/releases/tag/v0.1.0

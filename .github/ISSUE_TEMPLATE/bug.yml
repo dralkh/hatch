@@ -24,7 +24,7 @@ body:
     attributes:
       label: Version
       description: Release tag, container tag, commit SHA, or `python3 hatch.py --version` output.
-      placeholder: v0.3.0
+      placeholder: v0.4.0
     validations:
       required: true
   - type: textarea

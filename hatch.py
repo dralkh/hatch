@@ -1,13 +1,14 @@
 #!/usr/bin/env python3
 """Hatchframe: generate a complete animated pixel pet from one prompt.
 
-No third-party packages are required. Python 3.10+ is sufficient.
+Python 3.10+ is sufficient for PNG-returning providers. xAI currently returns
+JPEG, so that provider also needs Pillow for lossless conversion into Hatch's
+internal PNG pipeline.
 
 Quick start:
 
-    # Hosted FLUX path
-    export FAL_KEY="your-fal-key"
-    python3 hatch.py "baby dragon hawk, cyan and green"
+    # Hosted path; .env is loaded automatically
+    python3 hatch.py --provider openai "baby dragon hawk, cyan and green"
 
     # Local ComfyUI path (no cloud key)
     python3 hatch.py --provider comfyui \
@@ -25,7 +26,7 @@ The command creates a portable folder and ZIP containing:
     README.md        - integration notes
     qa.json          - per-state quality report
 
-The default hosted path uses FLUX.2 [klein] 9B through fal. ComfyUI and
+The hosted paths support fal, OpenAI, xAI, OpenRouter, and Google. ComfyUI and
 InvokeAI can run the same prompts against a user's own model and executable
 workflow templates. Chroma removal, pose extraction, run-left mirroring,
 normalization, atlas packing, the 24-frame hatch, QA, and export always happen
@@ -35,9 +36,11 @@ locally.
 from __future__ import annotations
 
 import argparse
+import base64
 import concurrent.futures
 import dataclasses
 import datetime as dt
+import io
 import json
 import math
 import os
@@ -59,9 +62,17 @@ from pathlib import Path
 from typing import Any, Iterable, Sequence
 
 
-VERSION = "0.3.0"
+VERSION = "0.4.0"
 TEXT_MODEL = "fal-ai/flux-2/klein/9b"
 EDIT_MODEL = "fal-ai/flux-2/klein/9b/edit"
+DIRECT_CLOUD_PROVIDERS = ("openai", "xai", "openrouter", "google")
+CLOUD_PROVIDERS = ("fal", *DIRECT_CLOUD_PROVIDERS)
+CLOUD_SETTINGS = {
+    "openai": ("OPENAI_API_KEY", "OPENAI_IMAGE_MODEL", "gpt-image-2"),
+    "xai": ("XAI_API_KEY", "XAI_IMAGE_MODEL", "grok-imagine-image-quality"),
+    "openrouter": ("OPENROUTER_API_KEY", "OPENROUTER_IMAGE_MODEL", "google/gemini-3.1-flash-image"),
+    "google": ("GOOGLE_API_KEY", "GOOGLE_IMAGE_MODEL", "gemini-3.1-flash-image"),
+}
 CELL_W = 192
 CELL_H = 208
 COLS = 8
@@ -73,6 +84,36 @@ HATCH_HEIGHT = CELL_H * HATCH_ROWS
 DEFAULT_SEED = 41721
 PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
 MAX_ASSET_BYTES = 25 * 1024 * 1024
+
+
+def load_dotenv() -> None:
+    """Load local development secrets without replacing exported variables."""
+    roots = (Path.cwd(), Path(__file__).resolve().parent)
+    seen: set[Path] = set()
+    for root in roots:
+        for name in (".env.local", ".env"):
+            path = root / name
+            if path in seen or not path.is_file():
+                continue
+            seen.add(path)
+            try:
+                lines = path.read_text(encoding="utf-8").splitlines()
+            except OSError as error:
+                raise HatchError(f"Unable to read {path}: {error}") from error
+            for raw in lines:
+                line = raw.strip()
+                if not line or line.startswith("#"):
+                    continue
+                if line.startswith("export "):
+                    line = line[7:].lstrip()
+                key, separator, value = line.partition("=")
+                key = key.strip()
+                if not separator or not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", key):
+                    continue
+                value = value.strip()
+                if len(value) >= 2 and value[0] == value[-1] and value[0] in ("'", '"'):
+                    value = value[1:-1]
+                os.environ.setdefault(key, value)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -188,6 +229,13 @@ COLOR_WORDS = (
 
 class HatchError(RuntimeError):
     """A user-actionable generation or packing error."""
+
+
+class ProviderHTTPError(HatchError):
+    def __init__(self, message: str, status: int, retry_after: float | None = None):
+        super().__init__(message)
+        self.status = status
+        self.retry_after = retry_after
 
 
 @dataclasses.dataclass
@@ -1021,10 +1069,23 @@ def _engine_request(
         try:
             decoded = json.loads(detail)
             if isinstance(decoded, dict):
-                detail = str(decoded.get("detail") or decoded.get("error") or decoded)
+                candidate = decoded.get("detail") or decoded.get("error") or decoded
+                if isinstance(candidate, dict):
+                    candidate = candidate.get("message") or candidate
+                detail = str(candidate)
         except Exception:
             pass
-        raise HatchError(f"{provider} request failed ({error.code}): {detail or error.reason}") from error
+        retry_after: float | None = None
+        try:
+            header = error.headers.get("Retry-After") if error.headers else None
+            retry_after = max(0.0, float(header)) if header else None
+        except (TypeError, ValueError):
+            retry_after = None
+        raise ProviderHTTPError(
+            f"{provider} request failed ({error.code}): {detail or error.reason}",
+            error.code,
+            retry_after,
+        ) from error
     except urllib.error.URLError as error:
         raise HatchError(f"Unable to reach {provider}: {error.reason}") from error
     if len(raw) > max_bytes:
@@ -1064,6 +1125,277 @@ def _multipart_png(field: str, filename: str, data: bytes) -> tuple[bytes, str]:
     body.extend(data)
     body.extend(f"\r\n--{boundary}--\r\n".encode())
     return bytes(body), f"multipart/form-data; boundary={boundary}"
+
+
+def _multipart_image(fields: dict[str, str], field: str, filename: str, data: bytes) -> tuple[bytes, str]:
+    boundary = f"----hatchframe-{uuid.uuid4().hex}"
+    body = bytearray()
+    for name, value in fields.items():
+        body.extend(f"--{boundary}\r\n".encode())
+        body.extend(f'Content-Disposition: form-data; name="{name}"\r\n\r\n'.encode())
+        body.extend(value.encode())
+        body.extend(b"\r\n")
+    body.extend(f"--{boundary}\r\n".encode())
+    body.extend(f'Content-Disposition: form-data; name="{field}"; filename="{filename}"\r\n'.encode())
+    body.extend(b"Content-Type: image/png\r\n\r\n")
+    body.extend(data)
+    body.extend(f"\r\n--{boundary}--\r\n".encode())
+    return bytes(body), f"multipart/form-data; boundary={boundary}"
+
+
+def _cloud_json(
+    provider: str,
+    url: str,
+    key: str,
+    *,
+    payload: dict[str, Any] | None = None,
+    body: bytes | None = None,
+    content_type: str = "application/json",
+) -> dict[str, Any]:
+    headers = {"User-Agent": f"Hatchframe-CLI/{VERSION}", "Content-Type": content_type}
+    if provider == "google":
+        headers["x-goog-api-key"] = key
+    else:
+        headers["Authorization"] = f"Bearer {key}"
+    if provider == "openrouter":
+        headers["X-Title"] = "Hatch"
+    request_body = json.dumps(payload).encode() if payload is not None else body
+    raw = b""
+    for attempt in range(5):
+        check_cancelled()
+        try:
+            raw, _headers = _engine_request(
+                provider,
+                url,
+                "POST",
+                data=request_body,
+                headers=headers,
+                timeout=240,
+                max_bytes=MAX_ASSET_BYTES * 2,
+            )
+            break
+        except ProviderHTTPError as error:
+            retryable = error.status == 429 or 500 <= error.status < 600
+            if not retryable or attempt == 4:
+                raise
+            delay = error.retry_after if error.retry_after is not None else min(60.0, 5.0 * (2 ** attempt))
+            delay = min(120.0, max(1.0, delay))
+            progress(f"{provider}: temporary HTTP {error.status}; retrying in {delay:g}s")
+            deadline = time.monotonic() + delay
+            while time.monotonic() < deadline:
+                check_cancelled()
+                time.sleep(min(0.5, deadline - time.monotonic()))
+    try:
+        result = json.loads(raw.decode())
+    except (UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise HatchError(f"{provider} returned invalid JSON.") from error
+    if not isinstance(result, dict):
+        raise HatchError(f"{provider} returned an unexpected response shape.")
+    return result
+
+
+def _base64_image(value: Any, provider: str) -> bytes:
+    if not isinstance(value, str) or not value:
+        raise HatchError(f"{provider} returned no inline image.")
+    if len(value) > MAX_ASSET_BYTES * 2:
+        raise HatchError(f"{provider} returned an image that is too large.")
+    try:
+        data = base64.b64decode(value, validate=True)
+    except Exception as error:
+        raise HatchError(f"{provider} returned invalid base64 image data.") from error
+    if not data or len(data) > MAX_ASSET_BYTES:
+        raise HatchError(f"{provider} returned an empty or oversized image.")
+    return data
+
+
+def _normalized_provider_png(data: bytes, provider: str) -> bytes:
+    if data.startswith(PNG_SIGNATURE):
+        try:
+            decode_png(data)
+            return data
+        except HatchError:
+            pass
+    if not (data.startswith(b"\xff\xd8\xff") or (len(data) >= 12 and data[:4] == b"RIFF" and data[8:12] == b"WEBP") or data.startswith(PNG_SIGNATURE)):
+        raise HatchError(f"{provider} returned an unsupported image format.")
+    try:
+        from PIL import Image as PillowImage
+        from PIL import UnidentifiedImageError
+    except ImportError as error:
+        raise HatchError(
+            f"{provider} returned JPEG/WebP. Install Pillow (`python3 -m pip install Pillow`) "
+            "so Hatch can convert it to PNG."
+        ) from error
+    try:
+        PillowImage.MAX_IMAGE_PIXELS = 16_000_000
+        with PillowImage.open(io.BytesIO(data)) as source:
+            source.load()
+            if source.width < 1 or source.height < 1 or source.width * source.height > 16_000_000:
+                raise HatchError(f"{provider} returned unsafe image dimensions.")
+            rgba = source.convert("RGBA")
+            return encode_png(Image(rgba.width, rgba.height, bytearray(rgba.tobytes())))
+    except HatchError:
+        raise
+    except (UnidentifiedImageError, OSError, ValueError) as error:
+        raise HatchError(f"{provider} returned an image that could not be decoded.") from error
+
+
+def _aspect_ratio(width: int, height: int) -> str:
+    return "1:1" if width == height else "16:9"
+
+
+def _openai_size(width: int, height: int) -> str:
+    return "1024x1024" if width == height else "1536x1024"
+
+
+class DirectCloudBackend(ImageBackend):
+    def __init__(self, provider: str, api_key: str, model: str):
+        if provider not in DIRECT_CLOUD_PROVIDERS:
+            raise HatchError(f"Unsupported direct cloud provider: {provider}.")
+        self.name = provider
+        self.api_key = api_key.strip()
+        self.model = model.strip()
+        if not self.api_key:
+            key_env = CLOUD_SETTINGS[provider][0]
+            raise HatchError(f"A {provider} API key is required. Set {key_env} or use --api-key.")
+        if not self.model:
+            raise HatchError(f"A {provider} image model is required.")
+        if provider == "xai":
+            try:
+                import PIL  # noqa: F401
+            except ImportError as error:
+                raise HatchError(
+                    "xAI currently returns JPEG. Install Pillow (`python3 -m pip install Pillow`) "
+                    "before starting a billable Hatch run."
+                ) from error
+
+    def _data_result(self, result: dict[str, Any]) -> bytes:
+        images = result.get("data")
+        first = images[0] if isinstance(images, list) and images and isinstance(images[0], dict) else None
+        return _base64_image(first.get("b64_json") if first else None, self.name)
+
+    def _generate_openai(self, prompt: str, width: int, height: int, reference: GeneratedImage | None) -> bytes:
+        url = "https://api.openai.com/v1/images/generations"
+        if reference is None:
+            result = _cloud_json(self.name, url, self.api_key, payload={
+                "model": self.model,
+                "prompt": prompt,
+                "size": _openai_size(width, height),
+                "quality": "low",
+                "output_format": "png",
+                "n": 1,
+            })
+        else:
+            body, content_type = _multipart_image({
+                "model": self.model,
+                "prompt": prompt,
+                "size": _openai_size(width, height),
+                "quality": "low",
+                "output_format": "png",
+            }, "image[]", "identity.png", reference.data)
+            result = _cloud_json(
+                self.name,
+                "https://api.openai.com/v1/images/edits",
+                self.api_key,
+                body=body,
+                content_type=content_type,
+            )
+        return self._data_result(result)
+
+    def _generate_xai(self, prompt: str, width: int, height: int, reference: GeneratedImage | None) -> bytes:
+        payload: dict[str, Any] = {
+            "model": self.model,
+            "prompt": prompt,
+            "n": 1,
+            "response_format": "b64_json",
+            "resolution": "1k",
+            "aspect_ratio": _aspect_ratio(width, height),
+        }
+        endpoint = "generations"
+        if reference is not None:
+            endpoint = "edits"
+            payload["image"] = {
+                "type": "image_url",
+                "url": f"data:image/png;base64,{base64.b64encode(reference.data).decode()}",
+            }
+        return self._data_result(_cloud_json(
+            self.name, f"https://api.x.ai/v1/images/{endpoint}", self.api_key, payload=payload,
+        ))
+
+    def _generate_openrouter(self, prompt: str, width: int, height: int, seed: int, reference: GeneratedImage | None) -> bytes:
+        payload: dict[str, Any] = {
+            "model": self.model,
+            "prompt": prompt,
+            "n": 1,
+            "resolution": "1K",
+            "aspect_ratio": _aspect_ratio(width, height),
+            "output_format": "png",
+            "seed": seed,
+        }
+        if reference is not None:
+            data_url = f"data:image/png;base64,{base64.b64encode(reference.data).decode()}"
+            payload["input_references"] = [{"type": "image_url", "image_url": {"url": data_url}}]
+        return self._data_result(_cloud_json(
+            self.name, "https://openrouter.ai/api/v1/images", self.api_key, payload=payload,
+        ))
+
+    def _generate_google(self, prompt: str, width: int, height: int, reference: GeneratedImage | None) -> bytes:
+        inputs: list[dict[str, Any]] = []
+        if reference is not None:
+            inputs.append({
+                "type": "image",
+                "mime_type": "image/png",
+                "data": base64.b64encode(reference.data).decode(),
+            })
+        inputs.append({"type": "text", "text": prompt})
+        result = _cloud_json(
+            self.name,
+            "https://generativelanguage.googleapis.com/v1beta/interactions",
+            self.api_key,
+            payload={
+                "model": self.model,
+                "store": False,
+                "input": inputs,
+                "response_format": {
+                    "type": "image",
+                    "mime_type": "image/png",
+                    "aspect_ratio": _aspect_ratio(width, height),
+                    "image_size": "1K",
+                },
+            },
+        )
+        steps = result.get("steps")
+        if isinstance(steps, list):
+            for step in reversed(steps):
+                if not isinstance(step, dict) or step.get("type") != "model_output":
+                    continue
+                content = step.get("content")
+                if not isinstance(content, list):
+                    continue
+                for item in reversed(content):
+                    if isinstance(item, dict) and item.get("type") == "image":
+                        return _base64_image(item.get("data"), self.name)
+        raise HatchError("google returned no generated image.")
+
+    def generate(
+        self,
+        prompt: str,
+        width: int,
+        height: int,
+        seed: int,
+        label: str,
+        reference: GeneratedImage | None = None,
+    ) -> GeneratedImage:
+        check_cancelled()
+        progress(f"{label}: sending to {'xAI' if self.name == 'xai' else self.name}")
+        if self.name == "openai":
+            data = self._generate_openai(prompt, width, height, reference)
+        elif self.name == "xai":
+            data = self._generate_xai(prompt, width, height, reference)
+        elif self.name == "openrouter":
+            data = self._generate_openrouter(prompt, width, height, seed, reference)
+        else:
+            data = self._generate_google(prompt, width, height, reference)
+        return GeneratedImage(_normalized_provider_png(data, self.name))
 
 
 def _replace_workflow_values(value: Any, replacements: dict[str, Any]) -> Any:
@@ -1500,14 +1832,31 @@ def write_package(
     return archive
 
 
-def dry_run(description: str, style: str, output: Path, seed: int, concurrency: int, auto_retry: bool, provider: str = "fal") -> None:
+def dry_run(
+    description: str,
+    style: str,
+    output: Path,
+    seed: int,
+    concurrency: int,
+    auto_retry: bool,
+    provider: str = "fal",
+    model_override: str | None = None,
+) -> None:
+    if provider == "fal":
+        models: dict[str, str] = {"anchor": TEXT_MODEL, "edits": EDIT_MODEL}
+    elif provider in DIRECT_CLOUD_PROVIDERS:
+        settings = CLOUD_SETTINGS[provider]
+        selected = (model_override or os.environ.get(settings[1]) or settings[2]).strip()
+        models = {"anchor": selected, "edits": selected}
+    else:
+        models = {"anchor": "local text workflow", "edits": "local reference workflow"}
     plan = {
         "description": description,
         "enhancedBrief": enhance_character_brief(description),
         "style": style,
         "provider": provider,
-        "models": {"anchor": TEXT_MODEL, "edits": EDIT_MODEL} if provider == "fal" else {"anchor": "local text workflow", "edits": "local reference workflow"},
-        "normalPaidJobs": 27 if provider == "fal" else 0,
+        "models": models,
+        "normalPaidJobs": 27 if provider in CLOUD_PROVIDERS else 0,
         "jobs": {"anchor": 1, "motionSegments": 25, "egg": 1},
         "localWork": ["chroma removal", "pose extraction", "run-left mirroring", "pivot normalization", "runtime atlas", "24-frame hatch", "QA", "ZIP export"],
         "geometry": {"cell": [CELL_W, CELL_H], "runtimeAtlas": [PET_WIDTH, PET_HEIGHT], "hatchAtlas": [PET_WIDTH, HATCH_HEIGHT]},
@@ -1637,13 +1986,22 @@ def _local_workflows(args: argparse.Namespace) -> tuple[dict[str, Any], dict[str
 
 
 def backend_from_args(args: argparse.Namespace) -> ImageBackend:
-    if args.provider == "fal":
+    if args.provider in CLOUD_PROVIDERS:
         if args.endpoint or args.workflow or args.text_workflow or args.edit_workflow or args.output_node or args.engine_token:
-            raise HatchError("Local workflow options cannot be used with --provider fal.")
-        key = (args.api_key or os.environ.get("FAL_KEY") or "").strip()
-        return FalBackend(key)
+            raise HatchError("Local workflow options cannot be used with a cloud provider.")
+        if args.provider == "fal":
+            if args.model:
+                raise HatchError("--model is not supported for fal because it uses separate anchor and edit models.")
+            key = (args.api_key or os.environ.get("FAL_KEY") or "").strip()
+            return FalBackend(key)
+        key_env, model_env, default_model = CLOUD_SETTINGS[args.provider]
+        key = (args.api_key or os.environ.get(key_env) or "").strip()
+        selected_model = (args.model or os.environ.get(model_env) or default_model).strip()
+        return DirectCloudBackend(args.provider, key, selected_model)
     if args.api_key:
-        raise HatchError("--api-key is only valid with --provider fal; use --engine-token for a local engine.")
+        raise HatchError("--api-key is only valid with a cloud provider; use --engine-token for a local engine.")
+    if args.model:
+        raise HatchError("--model is only valid with OpenAI, xAI, OpenRouter, or Google.")
     text_workflow, edit_workflow = _local_workflows(args)
     default_endpoint = "http://127.0.0.1:8188" if args.provider == "comfyui" else "http://127.0.0.1:9090"
     token = args.engine_token
@@ -1665,12 +2023,12 @@ def parser() -> argparse.ArgumentParser:
         prog="hatch.py",
         description="Generate a stable 81-frame animated pixel pet package from one text prompt.",
         epilog=(
-            "For fal, set FAL_KEY in the environment. Local ComfyUI and InvokeAI paths require "
-            "executable JSON workflow templates but no cloud credential."
+            "Hatch loads .env automatically. Set FAL_KEY, OPENAI_API_KEY, XAI_API_KEY, "
+            "OPENROUTER_API_KEY, or GOOGLE_API_KEY. Local engines require workflow templates."
         ),
     )
     cli.add_argument("description", nargs="?", help='Pet idea, for example: "baby dragon hawk, cyan and green"')
-    cli.add_argument("--provider", choices=("fal", "comfyui", "invoke"), default="fal", help="Generation engine (default: fal)")
+    cli.add_argument("--provider", choices=(*CLOUD_PROVIDERS, "comfyui", "invoke"), default="fal", help="Generation engine (default: fal)")
     cli.add_argument("--endpoint", help="Local engine base URL (defaults: ComfyUI :8188, InvokeAI :9090)")
     cli.add_argument("--workflow", type=Path, help="JSON bundle containing 'text' and 'edit' workflows")
     cli.add_argument("--text-workflow", type=Path, help="Text-to-image workflow JSON for a local provider")
@@ -1682,7 +2040,8 @@ def parser() -> argparse.ArgumentParser:
     cli.add_argument("--out", type=Path, help="Output directory (default: ./<pet>-sprite-pet)")
     cli.add_argument("--seed", type=int, default=DEFAULT_SEED, help=f"Deterministic base seed (default: {DEFAULT_SEED})")
     cli.add_argument("--concurrency", type=int, default=3, choices=range(1, 5), metavar="1-4", help="Maximum simultaneous engine jobs (default: 3)")
-    cli.add_argument("--api-key", help="fal key; FAL_KEY environment variable is safer")
+    cli.add_argument("--api-key", help="Selected cloud-provider key; the matching environment variable is safer")
+    cli.add_argument("--model", help="Optional image model override for OpenAI, xAI, OpenRouter, or Google")
     cli.add_argument("--no-retry", action="store_true", help="Do not retry a motion segment that omits a required pose")
     cli.add_argument("--dry-run", action="store_true", help="Print the complete model and local-processing plan without spending credits")
     cli.add_argument("--self-test", action="store_true", help="Run the full local image/export pipeline with synthetic inputs")
@@ -1691,6 +2050,11 @@ def parser() -> argparse.ArgumentParser:
 
 
 def main(argv: Sequence[str] | None = None) -> int:
+    try:
+        load_dotenv()
+    except HatchError as error:
+        progress(f"Error: {error}")
+        return 1
     args = parser().parse_args(argv)
     if args.self_test:
         self_test()
@@ -1702,14 +2066,14 @@ def main(argv: Sequence[str] | None = None) -> int:
         parser().error("description must be 600 characters or fewer")
     output = args.out or Path.cwd() / f"{slugify(description)}-sprite-pet"
     try:
-        if args.provider == "fal":
+        if args.provider in CLOUD_PROVIDERS:
             if args.endpoint or args.workflow or args.text_workflow or args.edit_workflow or args.output_node or args.engine_token:
-                raise HatchError("Local workflow options cannot be used with --provider fal.")
+                raise HatchError("Local workflow options cannot be used with a cloud provider.")
             backend = None if args.dry_run else backend_from_args(args)
         else:
             backend = backend_from_args(args)
         if args.dry_run:
-            dry_run(description, args.style, output, args.seed, args.concurrency, not args.no_retry, args.provider)
+            dry_run(description, args.style, output, args.seed, args.concurrency, not args.no_retry, args.provider, args.model)
             return 0
     except HatchError as error:
         parser().error(str(error))

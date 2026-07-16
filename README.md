@@ -21,8 +21,8 @@ The repository includes two complete ways to hatch a pet:
 
 - a polished web app with secured fal, OpenAI, xAI, OpenRouter, Google,
   ComfyUI and InvokeAI adapters;
-- one dependency-free [`hatch.py`](./hatch.py) command that can use fal,
-  ComfyUI or InvokeAI directly.
+- one [`hatch.py`](./hatch.py) command with the same fal, OpenAI, xAI,
+  OpenRouter, Google, ComfyUI and InvokeAI provider choices.
 
 No proprietary hosting project metadata, hosted database or vendor-specific
 application runtime is required.
@@ -149,7 +149,7 @@ health check.
 Preview releases are also published as public multi-platform images:
 
 ```sh
-docker run --rm -p 3000:3000 ghcr.io/dralkh/hatch:0.3.0
+docker run --rm -p 3000:3000 ghcr.io/dralkh/hatch:0.4.0
 ```
 
 Use the immutable version tag in production. The moving `preview` tag follows
@@ -165,7 +165,7 @@ docker run --rm -p 3000:3000 \
   -e COMFYUI_ENDPOINT=http://host.docker.internal:8188 \
   -e COMFYUI_TEXT_WORKFLOW=/config/anchor-api.json \
   -e COMFYUI_EDIT_WORKFLOW=/config/edit-api.json \
-  ghcr.io/dralkh/hatch:0.3.0
+  ghcr.io/dralkh/hatch:0.4.0
 ```
 
 The public Cloudflare deployment at <https://hatch.amayx.com/> supports the
@@ -177,17 +177,44 @@ limits. The standalone Python path remains useful for headless scripted runs.
 
 ## Standalone Python workflow
 
-`hatch.py` is the alternative to using the site. It needs Python 3.10+ and has
-no third-party dependencies.
+`hatch.py` is the alternative to using the site. It needs Python 3.10+. Its
+fal, OpenAI, OpenRouter, Google, ComfyUI and InvokeAI paths use only the Python
+standard library. Because xAI currently returns JPEG images, that path also
+needs Pillow to normalize them into Hatch's PNG processing pipeline:
 
-Download the release-pinned command and its checksum from the
-[v0.3.0 release](https://github.com/dralkh/hatch/releases/tag/v0.3.0), or use
-the copy in this repository:
+```sh
+python3 -m pip install Pillow
+```
+
+Download the release-pinned command and checksum from the
+[v0.4.0 release](https://github.com/dralkh/hatch/releases/tag/v0.4.0), or use
+the current copy in this repository:
 
 ```sh
 python3 hatch.py --version
 python3 hatch.py --self-test
 ```
+
+The CLI loads `.env.local` and `.env` automatically without replacing values
+already exported by the shell. The same key and model variables used by the
+web app work here.
+
+### OpenAI, xAI, OpenRouter and Google
+
+```sh
+python3 hatch.py --provider openai "a tiny cyan dragon-hawk"
+python3 hatch.py --provider xai "a tiny cyan dragon-hawk"
+python3 hatch.py --provider openrouter "a tiny cyan dragon-hawk"
+python3 hatch.py --provider google "a tiny cyan dragon-hawk"
+```
+
+The providers read `OPENAI_API_KEY`, `XAI_API_KEY`, `OPENROUTER_API_KEY` and
+`GOOGLE_API_KEY`. Their optional model overrides are `OPENAI_IMAGE_MODEL`,
+`XAI_IMAGE_MODEL`, `OPENROUTER_IMAGE_MODEL` and `GOOGLE_IMAGE_MODEL`; `--model`
+overrides the selected provider for one run. Each path creates the initial
+identity with text-to-image, then uses that private PNG reference for all 26
+motion/egg edits. Keys and generated references are never written to the pet
+package.
 
 ### fal
 
@@ -276,6 +303,7 @@ Useful CLI options:
 python3 hatch.py --help
 python3 hatch.py --self-test
 python3 hatch.py --provider comfyui --dry-run "mint moth cat"
+python3 hatch.py --provider openrouter --dry-run "mint moth cat"
 python3 hatch.py --style plush --seed 8128 --out ./my-pet "round sprout frog"
 ```
 
@@ -299,7 +327,7 @@ named `vMAJOR.MINOR.PATCH`; release tags are immutable, while `main` is the
 development branch. During the `v0.x` preview, interfaces may still evolve and
 GitHub releases are marked as prereleases.
 
-Each release provides source archives, the dependency-free `hatch.py` command,
+Each release provides source archives, the single-file `hatch.py` command,
 checksums and a matching `ghcr.io/dralkh/hatch` container image. See
 [CHANGELOG.md](./CHANGELOG.md) for user-visible changes.
 

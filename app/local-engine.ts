@@ -103,7 +103,7 @@ function endpointUrl(config: LocalProviderConfig, path: string) {
 
 function authHeaders(config: LocalProviderConfig, headers?: HeadersInit) {
   const output = new Headers(headers);
-  output.set("user-agent", "Hatchframe-Web/0.3.0");
+  output.set("user-agent", "Hatchframe-Web/0.4.0");
   if (config.token) output.set("authorization", `Bearer ${config.token}`);
   return output;
 }

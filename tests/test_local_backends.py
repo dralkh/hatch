@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import base64
 import contextlib
 import io
 import json
+import os
 import sys
 import tempfile
 import threading
@@ -166,6 +168,27 @@ class LocalBackendIntegrationTest(unittest.TestCase):
     def test_invokeai_native_queue_end_to_end(self) -> None:
         self._run_backend("invoke")
 
+    def test_direct_cloud_backend_end_to_end_pipeline(self) -> None:
+        def fake_cloud(_provider: str, _url: str, _key: str, **kwargs: Any) -> dict[str, Any]:
+            payload = kwargs.get("payload") or {}
+            prompt = payload.get("prompt", "") if isinstance(payload, dict) else ""
+            multipart = kwargs.get("body") or b""
+            pair = "TWO-POSE" in prompt or b"TWO-POSE" in multipart
+            encoded = base64.b64encode(synthetic_png(pair)).decode()
+            return {"data": [{"b64_json": encoded}]}
+
+        backend = hatch.DirectCloudBackend("openai", "secret", "gpt-image-2")
+        with tempfile.TemporaryDirectory(prefix="hatchframe-openai-") as temporary, mock.patch.object(
+            hatch, "_cloud_json", side_effect=fake_cloud
+        ):
+            output = Path(temporary) / "pet"
+            hatch._cancelled.clear()
+            archive = hatch.generate("tiny mint test pet", "pixel", output, 41721, 4, False, backend)
+            self.assertTrue((output / "spritesheet.png").is_file())
+            with zipfile.ZipFile(archive) as package:
+                self.assertEqual(json.loads(package.read("pet.json"))["provider"], "openai")
+                self.assertEqual(json.loads(package.read("qa.json"))["hatchFrames"], 24)
+
 
 class WorkflowContractTest(unittest.TestCase):
     def test_workflow_placeholders_preserve_exact_value_types(self) -> None:
@@ -216,6 +239,70 @@ class WorkflowContractTest(unittest.TestCase):
         self.assertEqual(queued.call_args_list[0].args[1], hatch.TEXT_MODEL)
         self.assertEqual(queued.call_args_list[1].args[1], hatch.EDIT_MODEL)
         self.assertEqual(queued.call_args_list[1].args[2]["image_urls"], ["https://fal.media/test.png"])
+
+    def test_dotenv_loads_provider_keys_without_overriding_exported_values(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            (root / ".env").write_text("OPENAI_API_KEY=file-key\nXAI_API_KEY='xai-key'\n")
+            previous = Path.cwd()
+            try:
+                os.chdir(root)
+                with mock.patch.object(hatch, "__file__", str(root / "hatch.py")), mock.patch.dict(
+                    os.environ, {"OPENAI_API_KEY": "exported-key"}, clear=True
+                ):
+                    hatch.load_dotenv()
+                    self.assertEqual(os.environ["OPENAI_API_KEY"], "exported-key")
+                    self.assertEqual(os.environ["XAI_API_KEY"], "xai-key")
+            finally:
+                os.chdir(previous)
+
+    def test_direct_cloud_backends_build_generation_and_reference_edit_requests(self) -> None:
+        png = synthetic_png(False)
+        encoded = base64.b64encode(png).decode()
+        calls: list[tuple[str, str, dict[str, Any]]] = []
+
+        def fake_cloud(provider: str, url: str, _key: str, **kwargs: Any) -> dict[str, Any]:
+            calls.append((provider, url, kwargs))
+            if provider == "google":
+                return {"steps": [{"type": "model_output", "content": [{"type": "image", "data": encoded, "mime_type": "image/png"}]}]}
+            return {"data": [{"b64_json": encoded}]}
+
+        defaults = {provider: hatch.CLOUD_SETTINGS[provider][2] for provider in hatch.DIRECT_CLOUD_PROVIDERS}
+        with mock.patch.object(hatch, "_cloud_json", side_effect=fake_cloud):
+            for provider in hatch.DIRECT_CLOUD_PROVIDERS:
+                backend = hatch.DirectCloudBackend(provider, "secret", defaults[provider])
+                anchor = backend.generate("anchor", 1024, 1024, 1, "anchor")
+                edited = backend.generate("edit", 1024, 512, 2, "edit", anchor)
+                self.assertTrue(anchor.data.startswith(hatch.PNG_SIGNATURE), provider)
+                self.assertTrue(edited.data.startswith(hatch.PNG_SIGNATURE), provider)
+
+        by_provider = {provider: [call for call in calls if call[0] == provider] for provider in hatch.DIRECT_CLOUD_PROVIDERS}
+        self.assertTrue(by_provider["openai"][1][1].endswith("/images/edits"))
+        self.assertIn(b'name="image[]"', by_provider["openai"][1][2]["body"])
+        self.assertNotIn(b"input_fidelity", by_provider["openai"][1][2]["body"])
+        self.assertIn("image", by_provider["xai"][1][2]["payload"])
+        self.assertIn("input_references", by_provider["openrouter"][1][2]["payload"])
+        self.assertEqual(by_provider["google"][1][2]["payload"]["input"][0]["type"], "image")
+
+    def test_backend_from_args_supports_every_direct_cloud_provider(self) -> None:
+        for provider in hatch.DIRECT_CLOUD_PROVIDERS:
+            key_env, _model_env, default_model = hatch.CLOUD_SETTINGS[provider]
+            args = hatch.parser().parse_args(["--provider", provider, "mint pet"])
+            with mock.patch.dict(os.environ, {key_env: "secret"}, clear=True):
+                backend = hatch.backend_from_args(args)
+            self.assertIsInstance(backend, hatch.DirectCloudBackend)
+            self.assertEqual(backend.name, provider)
+            self.assertEqual(backend.model, default_model)
+
+    def test_cloud_requests_retry_rate_limits(self) -> None:
+        limited = hatch.ProviderHTTPError("limited", 429, 0)
+        response = json.dumps({"data": []}).encode()
+        with mock.patch.object(hatch, "_engine_request", side_effect=[limited, (response, {})]) as request, mock.patch.object(
+            hatch.time, "monotonic", side_effect=[0.0, 2.0]
+        ):
+            result = hatch._cloud_json("openai", "https://api.openai.com/v1/images/generations", "secret", payload={"prompt": "test"})
+        self.assertEqual(result, {"data": []})
+        self.assertEqual(request.call_count, 2)
 
 
 if __name__ == "__main__":
