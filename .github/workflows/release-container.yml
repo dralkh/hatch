@@ -3,6 +3,12 @@ name: Publish container
 on:
   push:
     tags: ["v*.*.*"]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: SemVer image version (for example, v0.1.0)
+        required: true
+        type: string
 
 permissions:
   contents: read
@@ -16,6 +22,8 @@ jobs:
     needs: validate
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    env:
+      RELEASE_VERSION: ${{ inputs.version || github.ref_name }}
     permissions:
       contents: read
       packages: write
@@ -47,9 +55,9 @@ jobs:
           images: ghcr.io/${{ github.repository }}
           flavor: latest=false
           tags: |
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
-            type=raw,value=preview,enable=${{ startsWith(github.ref_name, 'v0.') }}
+            type=semver,pattern={{version}},value=${{ env.RELEASE_VERSION }}
+            type=semver,pattern={{major}}.{{minor}},value=${{ env.RELEASE_VERSION }}
+            type=raw,value=preview,enable=${{ startsWith(env.RELEASE_VERSION, 'v0.') || startsWith(env.RELEASE_VERSION, '0.') }}
           labels: |
             org.opencontainers.image.title=Hatch
             org.opencontainers.image.description=Generate consistent, transparent and playable pixel-art pet packages.
