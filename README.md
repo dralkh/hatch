@@ -19,7 +19,7 @@ result and exports a portable runtime.
 
 The repository includes two complete ways to hatch a pet:
 
-- a polished web app with a secured fal proxy;
+- a polished web app with secured fal, ComfyUI and InvokeAI adapters;
 - one dependency-free [`hatch.py`](./hatch.py) command that can use fal,
   ComfyUI or InvokeAI directly.
 
@@ -54,14 +54,42 @@ npm ci
 npm run dev
 ```
 
-Open the printed local URL. Paste an API-scoped fal key into the page, or set a
-server-side `FAL_KEY`. A browser-provided key stays in React memory only; it is
-never written to cookies, local storage, IndexedDB or source.
+Open the printed local URL. With no local engine configured, paste an
+API-scoped fal key into the page or set server-side `FAL_KEY`. A
+browser-provided key stays in React memory only; it is never written to
+cookies, local storage, IndexedDB or source.
 
 ```sh
 cp .env.example .env.local
 # Edit .env.local, then restart the development server.
 ```
+
+To use a local GPU engine from the web app, configure one endpoint and either
+mount both workflow paths on the server or upload both workflow JSON files in
+the browser:
+
+```sh
+# .env.local — ComfyUI example
+COMFYUI_ENDPOINT=http://127.0.0.1:8188
+COMFYUI_TEXT_WORKFLOW=/absolute/path/anchor-api.json
+COMFYUI_EDIT_WORKFLOW=/absolute/path/edit-api.json
+COMFYUI_OUTPUT_NODE=9
+
+# Or use InvokeAI instead
+INVOKEAI_ENDPOINT=http://127.0.0.1:9090
+INVOKEAI_TEXT_WORKFLOW=/absolute/path/anchor-graph.json
+INVOKEAI_EDIT_WORKFLOW=/absolute/path/edit-graph.json
+```
+
+When ComfyUI or InvokeAI is configured, it appears in **Generation engine**
+and is preferred automatically. fal remains available as a manual fallback.
+If mounted workflow paths are omitted, choose the two exported JSON workflows
+in the page. Browser overrides stay in the current tab; endpoint URLs and
+engine tokens never leave the Hatch server.
+
+Treat a self-hosted Hatch instance with a local engine like an engine control
+panel: keep it on a trusted network or put access control in front of it.
+Authenticated visitors can submit the browser workflow overrides you enable.
 
 ### Run the website with Docker
 
@@ -87,16 +115,30 @@ health check.
 Preview releases are also published as public multi-platform images:
 
 ```sh
-docker run --rm -p 3000:3000 ghcr.io/dralkh/hatch:0.1.0
+docker run --rm -p 3000:3000 ghcr.io/dralkh/hatch:0.2.0
 ```
 
 Use the immutable version tag in production. The moving `preview` tag follows
 the newest `v0.x` release; Hatch will not publish a `latest` image before 1.0.
 
-The website's generation route is intentionally fal-only. Browsers cannot
-reliably call a user's loopback GPU service from an HTTPS deployment because
-of mixed-content, CORS and private-network protections. The standalone Python
-path below connects to those engines directly without exposing them publicly.
+For a Dockerized Hatch server to reach an engine running on the host, mount a
+read-only workflow directory and add the host gateway:
+
+```sh
+docker run --rm -p 3000:3000 \
+  --add-host=host.docker.internal:host-gateway \
+  -v "$PWD/config:/config:ro" \
+  -e COMFYUI_ENDPOINT=http://host.docker.internal:8188 \
+  -e COMFYUI_TEXT_WORKFLOW=/config/anchor-api.json \
+  -e COMFYUI_EDIT_WORKFLOW=/config/edit-api.json \
+  ghcr.io/dralkh/hatch:0.2.0
+```
+
+The public Cloudflare deployment at <https://hatch.amayx.com/> remains
+fal-only because it cannot reach services on your private network. In a
+self-hosted npm or Docker deployment, the Hatch server calls ComfyUI or
+InvokeAI, avoiding browser mixed-content, CORS and private-network limits. The
+standalone Python path below remains useful for headless and scripted runs.
 
 ## Standalone Python workflow
 
@@ -104,7 +146,7 @@ path below connects to those engines directly without exposing them publicly.
 no third-party dependencies.
 
 Download the release-pinned command and its checksum from the
-[v0.1.0 release](https://github.com/dralkh/hatch/releases/tag/v0.1.0), or use
+[v0.2.0 release](https://github.com/dralkh/hatch/releases/tag/v0.2.0), or use
 the copy in this repository:
 
 ```sh
@@ -229,11 +271,15 @@ checksums and a matching `ghcr.io/dralkh/hatch` container image. See
 ## Security and privacy
 
 - fal credentials are never logged or persisted by the app;
+- local engine endpoints and tokens remain server-side; provider discovery
+  exposes capability flags only;
+- local workflow bodies and PNG responses are bounded and validated;
 - the Worker proxy only permits the two documented FLUX model IDs;
 - returned queue URLs must remain on `queue.fal.run` and match the request ID;
 - the asset proxy uses a generated-media host allowlist and response limits;
 - browser history stores only finished PNG blobs and pet metadata;
-- local engine endpoints and bearer tokens stay inside the CLI process.
+- browser-provided workflow overrides stay in page memory and are not included
+  in history or exported packages.
 
 See [SECURITY.md](./SECURITY.md) for reporting guidance and
 [RESEARCH.md](./RESEARCH.md) for model experiments, cost reasoning, the 405

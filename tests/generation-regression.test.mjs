@@ -26,6 +26,15 @@ test("persists finished pets locally without persisting credentials", () => {
   assert.match(source, /indexedDB\.open\(HISTORY_DB/);
   assert.match(source, /savePetLocally\(saved\)/);
   assert.doesNotMatch(source, /localStorage\.setItem\([^\n]*apiKey/);
+  const savedPetType = source.match(/type SavedPet = \{([\s\S]*?)\n\};/)?.[1] || "";
+  assert.doesNotMatch(savedPetType, /endpoint|token/i);
+});
+
+test("offers configured local providers without exposing their endpoints", () => {
+  assert.match(source, /discoverProviders\(\)/);
+  assert.match(source, /selectPreferredProvider\(available\)/);
+  assert.match(source, /new LocalBrowserBackend\(provider, workflows\)/);
+  assert.match(source, /Workflow JSON stays in this tab/);
 });
 
 test("renders every action as an animated preview and exposes the playable game", () => {

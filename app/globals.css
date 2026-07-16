@@ -122,9 +122,25 @@ textarea:focus, .key-field:focus-within { border-color: #2b7473; box-shadow: 0 0
 fieldset { margin: 0 0 24px; padding: 0; border: 0; }
 .segmented { display: grid; border: 1px solid #9eaaa5; border-radius: 3px; overflow: hidden; }
 .segmented.three { grid-template-columns: repeat(3, 1fr); }
+.segmented.providers { grid-template-columns: repeat(3, 1fr); }
+.segmented.providers.count-1 { grid-template-columns: 1fr; }
+.segmented.providers.count-2 { grid-template-columns: repeat(2, 1fr); }
 .segmented button { min-height: 45px; padding: 7px; border: 0; border-right: 1px solid #aeb9b4; background: rgba(255,255,255,.55); color: #53645e; font-size: 9px; font-weight: 850; }
+.segmented button:disabled { cursor: wait; opacity: .68; }
 .segmented button:last-child { border-right: 0; }
 .segmented button.active { background: var(--ink); color: white; }
+.local-workflows { padding: 14px; border: 1px solid #aeb9b4; background: rgba(255,255,255,.38); }
+.provider-status { display: grid; gap: 4px; margin-bottom: 13px; }
+.provider-status b { font-size: 10px; }
+.provider-status span { color: #687871; font-size: 9px; }
+.workflow-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.workflow-file { min-width: 0; padding: 10px; border: 1px dashed #87968f; background: rgba(255,255,255,.55); }
+.workflow-file span, .output-node { display: block; color: #354841; font-size: 8px; font-weight: 850; letter-spacing: .08em; text-transform: uppercase; }
+.workflow-file input { width: 100%; margin: 8px 0 4px; color: #5c6d66; font-size: 8px; }
+.workflow-file small { display: block; overflow: hidden; color: #60726a; font-size: 8px; text-overflow: ellipsis; white-space: nowrap; }
+.output-node { margin: 12px 0 7px; }
+.output-node span { color: #74847d; font-weight: 600; }
+.workflow-reset { width: 100%; margin-top: 8px; padding: 8px; border: 1px solid #a8b5af; background: transparent; color: #52635c; font-size: 8px; font-weight: 800; }
 .advanced { margin: 0 0 17px; border-top: 1px solid #b7c2bd; border-bottom: 1px solid #b7c2bd; }
 .advanced summary { padding: 14px 0; display: flex; justify-content: space-between; gap: 18px; list-style: none; font-size: 10px; font-weight: 850; text-transform: uppercase; letter-spacing: .09em; }
 .advanced summary::-webkit-details-marker { display: none; }

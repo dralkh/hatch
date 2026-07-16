@@ -1,6 +1,6 @@
 {
   "name": "hatchframe",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "description": "Generate consistent, transparent pixel-art pets from one prompt as portable, playable sprite packages.",
   "homepage": "https://hatch.amayx.com/",
@@ -46,7 +46,7 @@
   },
   "devDependencies": {
     "@cloudflare/vite-plugin": "1.45.0",
-    "@cloudflare/workers-types": "5.20260715.1",
+    "@cloudflare/workers-types": "5.20260716.1",
     "@tailwindcss/postcss": "4.2.1",
     "@types/node": "22.19.19",
     "@types/react": "19.2.14",

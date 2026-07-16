@@ -2,6 +2,18 @@
 
 import { strToU8, unzipSync, zipSync } from "fflate";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  FalBrowserBackend,
+  LocalBrowserBackend,
+  discoverProviders,
+  selectPreferredProvider,
+  type BrowserGenerationBackend,
+  type LocalProviderId,
+  type ProviderId,
+  type ProviderSummary,
+  type WorkflowObject,
+  type WorkflowOverrides,
+} from "./generation-client";
 import { GAME_LEVEL_VERSION, mergeGameRecord, type GameRecord, type GameResult } from "./game-engine";
 import BeaconGame from "./pet-game";
 
@@ -19,22 +31,6 @@ type StateId = "idle" | "running-right" | "running-left" | "waving" | "jumping" 
 type PreviewState = "hatch" | StateId;
 type Stage = "idle" | "anchor" | "generating" | "packing" | "ready" | "error";
 type JobStatus = "waiting" | "generating" | "cleaning" | "passed" | "warning" | "mirrored" | "error";
-
-type FalFile = { url: string; width?: number; height?: number; content_type?: string; file_name?: string };
-type FalResult = {
-  images?: FalFile[];
-  image?: FalFile;
-  video?: FalFile;
-  error?: string;
-  detail?: string;
-  request_id?: string;
-  status_url?: string;
-  response_url?: string;
-  cancel_url?: string;
-  status?: string;
-  queue_position?: number;
-  logs?: { message?: string }[];
-};
 
 type RowSpec = {
   id: StateId;
@@ -57,7 +53,7 @@ type RowQa = {
 
 type RowAsset = { frames: CleanFrame[]; qa: RowQa; attempts: number };
 type RowEntry = readonly [StateId, RowAsset];
-type PackingCache = { rowEntries: RowEntry[]; hatchUrl: string };
+type PackingCache = { rowEntries: RowEntry[]; hatchUrl: string; provider: ProviderId };
 type JobState = { status: JobStatus; detail: string; score?: number };
 type FrameBox = { x: number; y: number; width: number; height: number; opaque: number; edge: number; multiple: boolean };
 type CleanFrame = { canvas: HTMLCanvasElement; box: FrameBox };
@@ -72,6 +68,7 @@ type SavedPet = {
   score?: number;
   hatchSource?: string;
   source?: "generated" | "imported";
+  provider?: ProviderId;
   bestTimeMs?: number;
   gameRecord?: GameRecord;
 };
@@ -82,6 +79,7 @@ type Artifact = PlayablePet & {
   score: number;
   hatchSource: "local 24-frame hatch";
   source: "generated";
+  provider: ProviderId;
 };
 
 const rows: RowSpec[] = [
@@ -127,8 +125,6 @@ function enhanceCharacterBrief(raw: string) {
 
   return `Exactly one cohesive digital pet based on: ${compact}. Keep a compact full-body game silhouette, expressive face, symmetrical anatomy, consistent markings and one unmistakable visual identity. Interpret any comma-separated animals as traits of one hybrid, never as multiple creatures. No duplicate anatomy or extra creature.`;
 }
-
-const sleep = (ms: number) => new Promise((resolve) => window.setTimeout(resolve, ms));
 
 function proxiedAsset(url: string) {
   return `/api/asset?url=${encodeURIComponent(url)}`;
@@ -194,58 +190,6 @@ async function deleteSavedPet(id: string) {
     transaction.oncomplete = () => { database.close(); resolve(); };
     transaction.onerror = () => { database.close(); reject(transaction.error || new Error("Could not delete local history.")); };
   });
-}
-
-async function apiCall(apiKey: string, payload: Record<string, unknown>) {
-  const response = await fetch("/api/fal", {
-    method: "POST",
-    headers: {
-      "content-type": "application/json",
-      ...(apiKey ? { "x-fal-key": apiKey } : {}),
-    },
-    body: JSON.stringify(payload),
-  });
-  const data = (await response.json().catch(() => ({ error: "Invalid response from the server route." }))) as FalResult;
-  if (!response.ok) {
-    const message = typeof data.detail === "string" ? data.detail : typeof data.error === "string" ? data.error : `Request failed (${response.status}).`;
-    throw new Error(message);
-  }
-  return data;
-}
-
-async function runQueued(
-  apiKey: string,
-  model: string,
-  input: Record<string, unknown>,
-  onUpdate: (detail: string) => void,
-) {
-  const submitted = await apiCall(apiKey, { action: "submit", model, input });
-  const requestId = submitted.request_id;
-  const statusUrl = submitted.status_url;
-  const responseUrl = submitted.response_url;
-  if (!requestId || !statusUrl || !responseUrl) throw new Error("fal did not return complete queue lifecycle URLs.");
-
-  for (let poll = 0; poll < 360; poll += 1) {
-    await sleep(1500);
-    const status = await apiCall(apiKey, { action: "status", model, requestId, url: statusUrl });
-    if (status.status === "IN_QUEUE") {
-      const position = typeof status.queue_position === "number" ? ` · ${status.queue_position} ahead` : "";
-      onUpdate(`Queued${position}`);
-      continue;
-    }
-    if (status.status === "IN_PROGRESS") {
-      onUpdate(status.logs?.at(-1)?.message || "Model is working…");
-      continue;
-    }
-    if (status.status === "COMPLETED") {
-      if (status.error) throw new Error(status.error);
-      return apiCall(apiKey, { action: "result", model, requestId, url: responseUrl });
-    }
-    if (status.status === "FAILED" || status.status === "CANCELLED") {
-      throw new Error(status.error || `fal request ${status.status.toLowerCase()}.`);
-    }
-  }
-  throw new Error("The fal request did not finish within nine minutes.");
 }
 
 async function mapLimit<T, R>(items: T[], limit: number, worker: (item: T, index: number) => Promise<R>) {
@@ -658,6 +602,10 @@ function isArtStyle(value: unknown): value is ArtStyle {
   return value === "pixel" || value === "toon" || value === "plush";
 }
 
+function isProviderId(value: unknown): value is ProviderId {
+  return value === "fal" || value === "comfyui" || value === "invoke";
+}
+
 function readJsonFile(bytes: Uint8Array, label: string): Record<string, unknown> {
   try {
     const value = JSON.parse(new TextDecoder().decode(bytes));
@@ -750,6 +698,7 @@ async function importPetPackage(file: File): Promise<SavedPet> {
   return {
     id: crypto.randomUUID(), description, createdAt: new Date().toISOString(), petBlob, hatchBlob,
     artStyle: isArtStyle(metadata.artStyle) ? metadata.artStyle : undefined,
+    provider: isProviderId(metadata.provider) ? metadata.provider : undefined,
     source: "imported", hatchSource: "imported Hatch package",
   };
 }
@@ -794,6 +743,7 @@ async function buildPackageBlob(pet: SavedPet) {
     displayName: pet.description.slice(0, 80),
     description: pet.description,
     ...(pet.artStyle ? { artStyle: pet.artStyle } : {}),
+    ...(pet.provider ? { provider: pet.provider } : {}),
     createdAt: pet.createdAt,
     spritesheetPath: "spritesheet.png",
     createdBy: "Hatch",
@@ -905,10 +855,17 @@ function formatTime(milliseconds?: number) {
 export default function SpriteLab() {
   const generationLock = useRef(false);
   const cutoutUrls = useRef<string[]>([]);
+  const providerTouched = useRef(false);
   const packingCache = useRef<PackingCache | null>(null);
   const gameSectionRef = useRef<HTMLElement>(null);
   const importInputRef = useRef<HTMLInputElement>(null);
   const [apiKey, setApiKey] = useState("");
+  const [providers, setProviders] = useState<ProviderSummary[]>([{ id: "fal", label: "fal" }]);
+  const [provider, setProvider] = useState<ProviderId>("fal");
+  const [workflowOverrides, setWorkflowOverrides] = useState<Record<LocalProviderId, WorkflowOverrides>>({
+    comfyui: {},
+    invoke: {},
+  });
   const [description, setDescription] = useState("A round mint moon-moth kitten named Nibi — tiny cream face, two lavender antennae, leaf-shaped wings, stubby paws, star-shaped tail tip, oversized friendly dark eyes");
   const [artStyle, setArtStyle] = useState<ArtStyle>("pixel");
   const [autoRetry, setAutoRetry] = useState(true);
@@ -927,6 +884,8 @@ export default function SpriteLab() {
   const busy = stage === "anchor" || stage === "generating" || stage === "packing";
   const canRetryPacking = stage === "error" && packingRetryAvailable;
   const enhancedBrief = useMemo(() => enhanceCharacterBrief(description), [description]);
+  const selectedProvider = providers.find((candidate) => candidate.id === provider) || providers.at(-1) || { id: "fal", label: "fal" };
+  const localWorkflows = provider === "fal" ? undefined : workflowOverrides[provider];
 
   const selectPetForPlay = useCallback((pet: SavedPet, scroll = true) => {
     setPlayablePet({ ...pet, petUrl: URL.createObjectURL(pet.petBlob), hatchUrl: URL.createObjectURL(pet.hatchBlob) });
@@ -956,6 +915,18 @@ export default function SpriteLab() {
     return () => { cancelled = true; };
   }, [selectPetForPlay]);
 
+  useEffect(() => {
+    let cancelled = false;
+    discoverProviders().then((available) => {
+      if (cancelled || !available.length) return;
+      setProviders(available);
+      if (!providerTouched.current) setProvider(selectPreferredProvider(available));
+    }).catch(() => {
+      if (!cancelled) setProviders([{ id: "fal", label: "fal" }]);
+    });
+    return () => { cancelled = true; };
+  }, []);
+
   useEffect(() => () => {
     if (playablePet) {
       URL.revokeObjectURL(playablePet.petUrl);
@@ -963,22 +934,87 @@ export default function SpriteLab() {
     }
   }, [playablePet]);
 
-  const requestExample = useMemo(() => ({
+  const requestExample = useMemo(() => provider === "fal" ? ({
+    provider: "fal",
     submit: { method: "POST", url: "https://queue.fal.run/fal-ai/flux-2/klein/9b/edit", body: { image_urls: ["<anchor-url>"], prompt: pairPosePrompt(rows[0].phases[0], rows[0].phases[1], artStyle), image_size: { width: 1024, height: 512 }, num_inference_steps: 4, output_format: "png", num_images: 1 } },
     poll: "GET the status_url returned by submit",
     result: "GET the response_url returned by submit",
-  }), [artStyle]);
+  }) : ({
+    provider,
+    endpoint: "Configured on the Hatch server",
+    workflow: localWorkflows?.editName || (selectedProvider.serverWorkflows ? "server-mounted edit workflow" : "upload required"),
+    replacements: ["{{PROMPT}}", "{{NEGATIVE_PROMPT}}", "{{SEED}}", "{{WIDTH}}", "{{HEIGHT}}", "{{REFERENCE_IMAGE}}"],
+  }), [artStyle, localWorkflows?.editName, provider, selectedProvider.serverWorkflows]);
 
   function registerCutout(cutout: Cutout): string {
     cutoutUrls.current.push(cutout.url);
     return cutout.url;
   }
 
+  function registerGeneratedSource(source: { url: string; blob?: Blob }) {
+    if (source.blob) cutoutUrls.current.push(source.url);
+    return source.url;
+  }
+
+  function selectProvider(next: ProviderId) {
+    if (generationLock.current) return;
+    providerTouched.current = true;
+    setProvider(next);
+    setError("");
+  }
+
+  async function loadWorkflowFile(localProvider: LocalProviderId, kind: "text" | "edit", file?: File) {
+    if (!file) return;
+    if (file.size > 2 * 1024 * 1024) {
+      setError("Workflow JSON must be 2 MB or smaller.");
+      return;
+    }
+    try {
+      const parsed = JSON.parse(await file.text()) as unknown;
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error();
+      setWorkflowOverrides((current) => ({
+        ...current,
+        [localProvider]: {
+          ...current[localProvider],
+          [kind]: parsed as WorkflowObject,
+          [`${kind}Name`]: file.name,
+        },
+      }));
+      setError("");
+    } catch {
+      setError(`${file.name} is not a JSON workflow object.`);
+    }
+  }
+
+  function setLocalOutputNode(localProvider: LocalProviderId, outputNode: string) {
+    setWorkflowOverrides((current) => ({
+      ...current,
+      [localProvider]: { ...current[localProvider], outputNode },
+    }));
+  }
+
+  function clearWorkflowOverrides(localProvider: LocalProviderId) {
+    setWorkflowOverrides((current) => ({ ...current, [localProvider]: {} }));
+    setError("");
+  }
+
+  function generationBackend(): BrowserGenerationBackend {
+    if (provider === "fal") return new FalBrowserBackend(apiKey);
+    const summary = providers.find((candidate) => candidate.id === provider);
+    if (!summary) throw new Error(`${provider} is not configured on this Hatch server.`);
+    const workflows = workflowOverrides[provider];
+    const hasTextOverride = Boolean(workflows.text);
+    const hasEditOverride = Boolean(workflows.edit);
+    if (hasTextOverride !== hasEditOverride) throw new Error("Upload both the text and reference-edit workflow, or remove the partial override.");
+    if (!hasTextOverride && !summary.serverWorkflows) throw new Error(`Upload both ${summary.label} workflows before generating.`);
+    return new LocalBrowserBackend(provider, workflows);
+  }
+
   function patchJob(id: StateId | "hatch", update: Partial<JobState>) {
     setJobs((current) => ({ ...current, [id]: { ...current[id], ...update } }));
   }
 
-  async function buildRow(row: RowSpec, canonicalUrl: string, seed: number): Promise<RowAsset> {
+  async function buildRow(row: RowSpec, backend: BrowserGenerationBackend, canonicalReference: string, seed: number): Promise<RowAsset> {
     const maxAttempts = autoRetry ? 2 : 1;
     const segmentCount = Math.ceil(row.phases.length / 2);
     const frames: CleanFrame[] = [];
@@ -996,17 +1032,16 @@ export default function SpriteLab() {
         const prompt = expected === 2
           ? pairPosePrompt(phases[0], phases[1], artStyle, retryReasons)
           : singlePosePrompt(phases[0], artStyle, retryReasons);
-        const edited = await runQueued(apiKey, "fal-ai/flux-2/klein/9b/edit", {
+        const edited = await backend.generate({
+          kind: "edit",
           prompt,
-          image_urls: [canonicalUrl],
-          image_size: expected === 2 ? { width: 1024, height: 512 } : "square",
-          num_inference_steps: 4,
-          output_format: "png",
-          num_images: 1,
+          reference: canonicalReference,
+          width: 1024,
+          height: expected === 2 ? 512 : 1024,
           seed: seed + start * 11 + attempt - 1,
-        }, (message) => patchJob(row.id, { status: "generating", detail: `${segment}/${segmentCount} · ${message.slice(0, 52)}` }));
-        const rawUrl = edited.images?.[0]?.url;
-        if (!rawUrl) throw new Error(`${row.label} segment ${segment} returned no image.`);
+          onUpdate: (message) => patchJob(row.id, { status: "generating", detail: `${segment}/${segmentCount} · ${message.slice(0, 52)}` }),
+        });
+        const rawUrl = registerGeneratedSource(edited);
         patchJob(row.id, { status: "cleaning", detail: `${segment}/${segmentCount} · local alpha · $0` });
         const url = registerCutout(await removeChroma(rawUrl));
         const image = await loadImage(url);
@@ -1027,13 +1062,18 @@ export default function SpriteLab() {
     return asset;
   }
 
-  async function buildHatchSources(canonicalUrl: string, seed: number): Promise<string> {
+  async function buildHatchSources(backend: BrowserGenerationBackend, canonicalReference: string, seed: number): Promise<string> {
     patchJob("hatch", { status: "generating", detail: "Designing the egg" });
-    const egg = await runQueued(apiKey, "fal-ai/flux-2/klein/9b/edit", {
-      prompt: eggPrompt(artStyle), image_urls: [canonicalUrl], image_size: "square", num_inference_steps: 4, output_format: "png", num_images: 1, seed,
-    }, (message) => patchJob("hatch", { status: "generating", detail: message.slice(0, 70) }));
-    const eggRaw = egg.images?.[0]?.url;
-    if (!eggRaw) throw new Error("The egg model returned no image.");
+    const egg = await backend.generate({
+      kind: "edit",
+      prompt: eggPrompt(artStyle),
+      reference: canonicalReference,
+      width: 1024,
+      height: 1024,
+      seed,
+      onUpdate: (message) => patchJob("hatch", { status: "generating", detail: message.slice(0, 70) }),
+    });
+    const eggRaw = registerGeneratedSource(egg);
     patchJob("hatch", { status: "cleaning", detail: "Removing chroma locally · $0" });
     return registerCutout(await removeChroma(eggRaw));
   }
@@ -1057,7 +1097,7 @@ export default function SpriteLab() {
       artStyle,
       createdAt: new Date().toISOString(),
       petBlob, hatchBlob, petUrl: URL.createObjectURL(petBlob), hatchUrl: URL.createObjectURL(hatchBlob), score, hatchSource,
-      source: "generated",
+      source: "generated", provider: cache.provider,
     };
     packingCache.current = null;
     setPackingRetryAvailable(false);
@@ -1066,7 +1106,7 @@ export default function SpriteLab() {
     setDetail(`81 populated frames ready · ${PET_WIDTH}×${PET_HEIGHT} pet + ${PET_WIDTH}×${HATCH_HEIGHT} hatch`);
     const saved: SavedPet = {
       id: next.id, description: next.description, artStyle: next.artStyle, createdAt: next.createdAt,
-      petBlob: next.petBlob, hatchBlob: next.hatchBlob, score: next.score, hatchSource: next.hatchSource, source: "generated",
+      petBlob: next.petBlob, hatchBlob: next.hatchBlob, score: next.score, hatchSource: next.hatchSource, source: "generated", provider: next.provider,
     };
     selectPetForPlay(saved, false);
     try {
@@ -1101,6 +1141,14 @@ export default function SpriteLab() {
       setStage("error");
       return;
     }
+    let backend: BrowserGenerationBackend;
+    try {
+      backend = generationBackend();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "The selected provider is not ready.");
+      setStage("error");
+      return;
+    }
     generationLock.current = true;
     cutoutUrls.current.forEach((url) => URL.revokeObjectURL(url));
     cutoutUrls.current = [];
@@ -1114,32 +1162,40 @@ export default function SpriteLab() {
     try {
       setStage("anchor");
       setDetail("Creating the canonical identity anchor…");
-      const anchor = await runQueued(apiKey, "fal-ai/flux-2/klein/9b", {
-        prompt: characterPrompt(description.trim(), artStyle), image_size: "square_hd", num_inference_steps: 4, output_format: "png", num_images: 1, seed,
-      }, setDetail);
-      const canonicalUrl = anchor.images?.[0]?.url;
-      if (!canonicalUrl) throw new Error("The character model returned no anchor image.");
+      const anchor = await backend.generate({
+        kind: "text",
+        prompt: characterPrompt(description.trim(), artStyle),
+        width: 1024,
+        height: 1024,
+        seed,
+        onUpdate: setDetail,
+      });
+      const canonicalUrl = registerGeneratedSource(anchor);
       setDetail("Removing anchor background locally…");
       setAnchorUrl(registerCutout(await removeChroma(canonicalUrl)));
+      setDetail(backend.id === "fal"
+        ? "Identity anchor ready for reference edits…"
+        : `Uploading the identity anchor to ${backend.id === "comfyui" ? "ComfyUI" : "InvokeAI"}…`);
+      const canonicalReference = await backend.prepareReference(anchor);
       setStage("generating");
       setDetail("Generating exact two-pose motion pairs and one egg in parallel…");
 
       const rowPromise = mapLimit(generatedRows, 3, async (row, index) => {
         try {
-          return [row.id, await buildRow(row, canonicalUrl, seed + 100 + index * 17)] as const;
+          return [row.id, await buildRow(row, backend, canonicalReference, seed + 100 + index * 17)] as const;
         } catch (cause) {
           const message = cause instanceof Error ? cause.message : `${row.label} failed.`;
           patchJob(row.id, { status: "error", detail: message });
           throw cause;
         }
       });
-      const hatchPromise = buildHatchSources(canonicalUrl, seed + 900).catch((cause) => {
+      const hatchPromise = buildHatchSources(backend, canonicalReference, seed + 900).catch((cause) => {
         const message = cause instanceof Error ? cause.message : "Hatch generation failed.";
         patchJob("hatch", { status: "error", detail: message });
         throw cause;
       });
       const [rowEntries, hatchUrl] = await Promise.all([rowPromise, hatchPromise]);
-      const cache: PackingCache = { rowEntries, hatchUrl };
+      const cache: PackingCache = { rowEntries, hatchUrl, provider: backend.id };
       packingCache.current = cache;
       setPackingRetryAvailable(true);
       await packArtifacts(cache);
@@ -1204,6 +1260,7 @@ export default function SpriteLab() {
       id: playablePet.id, description: playablePet.description, artStyle: playablePet.artStyle, createdAt: playablePet.createdAt,
       petBlob: playablePet.petBlob, hatchBlob: playablePet.hatchBlob, score: playablePet.score,
       hatchSource: playablePet.hatchSource, source: playablePet.source, bestTimeMs: playablePet.bestTimeMs, gameRecord,
+      provider: playablePet.provider,
     };
     setPlayablePet((current) => current?.id === petId ? {
       ...current, gameRecord,
@@ -1231,11 +1288,44 @@ export default function SpriteLab() {
     <>
     <div className="lab-shell atlas-lab">
       <section className="lab-controls" aria-label="Pet generator controls">
-        <div className="field-block">
-          <label htmlFor="fal-key">fal API key</label>
-          <div className="key-field"><span aria-hidden="true">◆</span><input id="fal-key" type="password" value={apiKey} onChange={(event) => setApiKey(event.target.value)} placeholder="Paste an API-scoped key" autoComplete="off" spellCheck="false" /></div>
-          <p className="field-help">Held only in page memory. Leave blank when <code>FAL_KEY</code> is configured on the server.</p>
-        </div>
+        <fieldset>
+          <legend>Generation engine</legend>
+          <div className={`segmented providers count-${providers.length}`}>
+            {providers.map((candidate) => (
+              <button type="button" key={candidate.id} className={provider === candidate.id ? "active" : ""} onClick={() => selectProvider(candidate.id)} disabled={busy} aria-pressed={provider === candidate.id}>
+                {candidate.label}
+              </button>
+            ))}
+          </div>
+          <p className="field-help">Local engines are preferred when this self-hosted Hatch server exposes one. The public site exposes fal only.</p>
+        </fieldset>
+        {provider === "fal" ? (
+          <div className="field-block">
+            <label htmlFor="fal-key">fal API key</label>
+            <div className="key-field"><span aria-hidden="true">◆</span><input id="fal-key" type="password" value={apiKey} onChange={(event) => setApiKey(event.target.value)} placeholder="Paste an API-scoped key" autoComplete="off" spellCheck="false" /></div>
+            <p className="field-help">Held only in page memory. {selectedProvider.serverCredential ? "This server already has FAL_KEY configured." : "Required because this server has no FAL_KEY."}</p>
+          </div>
+        ) : localWorkflows ? (
+          <div className="field-block local-workflows">
+            <div className="provider-status"><b>{selectedProvider.label} is connected</b><span>{selectedProvider.serverWorkflows ? "Mounted workflow defaults are ready." : "Upload both workflow exports to continue."}</span></div>
+            <div className="workflow-grid">
+              <label className="workflow-file">
+                <span>Text workflow</span>
+                <input type="file" accept=".json,application/json" disabled={busy} onChange={(event) => loadWorkflowFile(provider, "text", event.target.files?.[0])} />
+                <small>{localWorkflows.textName || (selectedProvider.serverWorkflows ? "Server default" : "Required")}</small>
+              </label>
+              <label className="workflow-file">
+                <span>Edit workflow</span>
+                <input type="file" accept=".json,application/json" disabled={busy} onChange={(event) => loadWorkflowFile(provider, "edit", event.target.files?.[0])} />
+                <small>{localWorkflows.editName || (selectedProvider.serverWorkflows ? "Server default" : "Required")}</small>
+              </label>
+            </div>
+            <label className="output-node" htmlFor={`${provider}-output-node`}>Output node <span>optional</span></label>
+            <div className="key-field"><span aria-hidden="true">#</span><input id={`${provider}-output-node`} type="text" value={localWorkflows.outputNode || ""} onChange={(event) => setLocalOutputNode(provider, event.target.value)} placeholder={selectedProvider.outputNodeConfigured ? "Using server default" : "Auto-detect first image"} autoComplete="off" spellCheck="false" /></div>
+            {(localWorkflows.text || localWorkflows.edit || localWorkflows.outputNode) && <button type="button" className="workflow-reset" disabled={busy} onClick={() => clearWorkflowOverrides(provider)}>{selectedProvider.serverWorkflows ? "Use server workflow defaults" : "Clear browser overrides"}</button>}
+            <p className="field-help">Workflow JSON stays in this tab and is sent only to your Hatch server. It is never saved in pet history or exports.</p>
+          </div>
+        ) : null}
         <div className="field-block">
           <label htmlFor="pet-description">Describe the pet</label>
           <textarea id="pet-description" value={description} onChange={(event) => setDescription(event.target.value)} rows={4} maxLength={900} />
@@ -1256,10 +1346,10 @@ export default function SpriteLab() {
           </div>
         </fieldset>
         <details className="advanced">
-          <summary>Advanced execution <span>FLUX.2 [klein] 9B + local alpha</span></summary>
+          <summary>Advanced execution <span>{provider === "fal" ? "FLUX.2 [klein] 9B" : selectedProvider.label} + local alpha</span></summary>
           <div className="advanced-body">
-            <label className="check-row"><input type="checkbox" checked={autoRetry} onChange={(event) => setAutoRetry(event.target.checked)} /><span><b>Retry a missing pose pair once</b><small>Adds about $0.02 only when a two-pose segment fails.</small></span></label>
-            <button type="button" className="copy-request" onClick={copyRequest}>{copied ? "Copied queue contract" : "Copy queue request example"}</button>
+            <label className="check-row"><input type="checkbox" checked={autoRetry} onChange={(event) => setAutoRetry(event.target.checked)} /><span><b>Retry a missing pose pair once</b><small>{provider === "fal" ? "Adds about $0.02 only when a two-pose segment fails." : `Runs one extra ${selectedProvider.label} job only when a pose pair fails.`}</small></span></label>
+            <button type="button" className="copy-request" onClick={copyRequest}>{copied ? "Copied provider contract" : "Copy provider request example"}</button>
           </div>
         </details>
         {canRetryPacking ? (
@@ -1267,7 +1357,7 @@ export default function SpriteLab() {
         ) : (
           <button className="generate-button" type="button" disabled={busy} onClick={generate}><span>{busy ? "Hatching your pet…" : "Generate full pet package"}</span><b aria-hidden="true">{busy ? "···" : "→"}</b></button>
         )}
-        <p className="cost-note">Full no-retry run: 27 fal jobs, about $0.43 at listed FLUX pricing. Small two-pose requests are deliberate: they reliably return exact counts. Alpha, mirroring, packing and all 24 hatch frames are local and free.</p>
+        <p className="cost-note">{provider === "fal" ? "Full no-retry run: 27 fal jobs, about $0.43 at listed FLUX pricing. " : `Full no-retry run: 27 jobs on your ${selectedProvider.label} engine; Hatch adds no generation charge. `}Small two-pose requests are deliberate: they reliably return exact counts. Alpha, mirroring, packing and all 24 hatch frames run in this browser.</p>
       </section>
 
       <section className="lab-output" aria-label="Generated pet output">
@@ -1343,7 +1433,7 @@ export default function SpriteLab() {
             <article className={`history-card ${playablePet?.id === pet.id ? "selected" : ""}`} key={pet.id}>
               <div className="history-preview checkerboard"><PetThumbnail pet={pet} /></div>
               <div className="history-card-copy">
-                <span>{pet.source === "imported" ? "Imported" : "Generated"} · {new Date(pet.createdAt).toLocaleDateString()}</span>
+                <span>{pet.source === "imported" ? "Imported" : "Generated"}{pet.provider ? ` via ${pet.provider === "comfyui" ? "ComfyUI" : pet.provider === "invoke" ? "InvokeAI" : "fal"}` : ""} · {new Date(pet.createdAt).toLocaleDateString()}</span>
                 <h4>{pet.description}</h4>
                 <p>Beacon Rescue <strong>{pet.gameRecord?.levelVersion === GAME_LEVEL_VERSION ? formatTime(pet.gameRecord.bestTimeMs) : "Not cleared"}</strong> · {pet.gameRecord?.levelVersion === GAME_LEVEL_VERSION ? pet.gameRecord.badges.length : 0}/3 badges</p>
               </div>

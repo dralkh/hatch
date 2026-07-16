@@ -68,3 +68,33 @@ test("asset route rejects malformed media byte ranges before fetching", async ()
   assert.equal(response.status, 416);
   assert.match(await response.text(), /Invalid byte range/i);
 });
+
+test("provider discovery exposes fal and no unconfigured local endpoints", async () => {
+  const worker = await loadWorker();
+  const response = await worker.fetch(new Request("http://localhost/api/providers"), env, ctx);
+  assert.equal(response.status, 200);
+  assert.deepEqual((await response.json()).providers.map((provider) => provider.id), ["fal"]);
+  assert.equal(response.headers.get("cache-control"), "no-store");
+});
+
+test("local route rejects cross-origin requests before provider access", async () => {
+  const worker = await loadWorker();
+  const response = await worker.fetch(new Request("http://localhost/api/local?provider=comfyui&action=status", {
+    method: "POST",
+    headers: { "content-type": "application/json", origin: "https://attacker.example" },
+    body: JSON.stringify({ jobId: "job_1" }),
+  }), env, ctx);
+  assert.equal(response.status, 403);
+  assert.match(await response.text(), /cross-origin/i);
+});
+
+test("local route does not expose an unconfigured engine", async () => {
+  const worker = await loadWorker();
+  const response = await worker.fetch(new Request("http://localhost/api/local?provider=comfyui&action=status", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ jobId: "job_1" }),
+  }), env, ctx);
+  assert.equal(response.status, 404);
+  assert.match(await response.text(), /not configured/i);
+});
