@@ -185,7 +185,7 @@ health check.
 Preview releases are also published as public multi-platform images:
 
 ```sh
-docker run --rm -p 3000:3000 ghcr.io/dralkh/hatch:0.5.0
+docker run --rm -p 3000:3000 ghcr.io/dralkh/hatch:0.6.0
 ```
 
 Use the immutable version tag in production. The moving `preview` tag follows
@@ -201,7 +201,7 @@ docker run --rm -p 3000:3000 \
   -e COMFYUI_ENDPOINT=http://host.docker.internal:8188 \
   -e COMFYUI_TEXT_WORKFLOW=/config/anchor-api.json \
   -e COMFYUI_EDIT_WORKFLOW=/config/edit-api.json \
-  ghcr.io/dralkh/hatch:0.5.0
+  ghcr.io/dralkh/hatch:0.6.0
 ```
 
 The public Cloudflare deployment at <https://hatch.amayx.com/> supports the
@@ -223,7 +223,7 @@ python3 -m pip install Pillow
 ```
 
 Download the release-pinned command and checksum from the
-[v0.5.0 release](https://github.com/dralkh/hatch/releases/tag/v0.5.0), or use
+[v0.6.0 release](https://github.com/dralkh/hatch/releases/tag/v0.6.0), or use
 the current copy in this repository:
 
 ```sh

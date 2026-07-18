@@ -1,6 +1,6 @@
 {
   "name": "hatchframe",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "private": true,
   "description": "Generate consistent, transparent pixel-art pets from one prompt as portable, playable sprite packages.",
   "homepage": "https://hatch.amayx.com/",

@@ -3,6 +3,24 @@
 Hatch follows [Semantic Versioning](https://semver.org/). The project is in
 public preview, so `0.x` releases may still change interfaces.
 
+## [0.6.0] - 2026-07-18
+
+### Added
+
+- Endless Patrol mode with deterministic streamed rooms, combat waves,
+  guardians, temporary upgrades and per-difficulty local records.
+- Three cleansing weapons, visible Explorer, Adventure and Expert presets,
+  enemy combat and a fourth mastery badge in the authored Beacon Rescue mode.
+- A real-time public Endless Patrol leaderboard with constrained submissions,
+  origin checks and network rate limits.
+- Direct import of Hatch and Hermes/Petdex ZIP packages plus loose 1536×1872
+  PNG or WebP runtime atlases, including locally generated hatch animations.
+
+### Changed
+
+- Game records now track Story and Endless results separately by difficulty,
+  while retaining legacy Beacon Rescue records during migration.
+
 ## [0.5.0] - 2026-07-16
 
 ### Added
@@ -86,6 +104,7 @@ public preview, so `0.x` releases may still change interfaces.
 - Queue lifecycle and generated-asset URLs are constrained before fetching.
 - Local engine tokens remain inside the CLI process.
 
+[0.6.0]: https://github.com/dralkh/hatch/releases/tag/v0.6.0
 [0.5.0]: https://github.com/dralkh/hatch/releases/tag/v0.5.0
 [0.4.0]: https://github.com/dralkh/hatch/releases/tag/v0.4.0
 [0.3.0]: https://github.com/dralkh/hatch/releases/tag/v0.3.0

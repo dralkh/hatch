@@ -62,7 +62,7 @@ from pathlib import Path
 from typing import Any, Iterable, Sequence
 
 
-VERSION = "0.5.0"
+VERSION = "0.6.0"
 TEXT_MODEL = "fal-ai/flux-2/klein/9b"
 EDIT_MODEL = "fal-ai/flux-2/klein/9b/edit"
 DIRECT_CLOUD_PROVIDERS = ("openai", "xai", "openrouter", "google")
