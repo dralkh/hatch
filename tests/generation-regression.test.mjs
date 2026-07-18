@@ -89,7 +89,7 @@ test("imports bounded Hatchframe packages and keeps them in local history", () =
 });
 
 test("records versioned Beacon Rescue results and merges mastery badges", () => {
-  assert.match(engineSource, /GAME_LEVEL_VERSION = 2/);
+  assert.match(engineSource, /GAME_LEVEL_VERSION = 3/);
   assert.match(engineSource, /type GameRecord/);
   assert.match(source, /mergeGameRecord\(playablePet\.gameRecord, result\)/);
   assert.match(engineSource, /Math\.min\(prior\.bestTimeMs, result\.elapsedMs\)/);

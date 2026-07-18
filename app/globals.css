@@ -583,3 +583,86 @@ textarea:focus, .key-field:focus-within { border-color: var(--ink); box-shadow: 
   .result-badges { grid-template-columns: 1fr; }
   .result-badges > span { min-height: 48px; }
 }
+
+/* Beacon Wilds: explicit difficulty, combat loadout and endless-run overlays. */
+.combat-hud { grid-template-columns: repeat(5, minmax(0, 1fr)) auto; }
+.combat-hud strong i { color: #627269; font-style: normal; }
+.combat-hud .weapon-hud strong { overflow: hidden; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+.setup-overlay { align-content: center; overflow-y: auto; }
+.game-setup-group { width: min(620px, 96%); display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; margin: 8px 0; }
+.game-setup-group button { min-height: 62px; display: grid; align-content: center; gap: 4px; border: 1px solid rgba(226,239,214,.28); background: rgba(255,255,255,.06); color: white; box-shadow: none; text-transform: capitalize; }
+.game-setup-group button small { color: #aab9ae; font: 700 7px ui-monospace, SFMono-Regular, Menlo, monospace; }
+.game-setup-group button.selected { border-color: var(--cyan); background: rgba(92,246,255,.14); color: var(--lime); box-shadow: 3px 3px 0 rgba(184,164,255,.55); }
+.game-setup-group.difficulty-picks { grid-template-columns: repeat(3, 1fr); }
+.setup-overlay .begin-run { margin-top: 10px; background: var(--cyan); color: var(--ink); box-shadow: 4px 4px 0 var(--violet); }
+.upgrade-overlay strong { margin-bottom: 14px; }
+.upgrade-grid { width: min(760px, 96%); display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+.upgrade-grid button { min-height: 105px; display: grid; align-content: center; gap: 7px; border: 2px solid rgba(226,239,214,.35); background: #1b2b22; color: var(--lime); text-align: left; box-shadow: 4px 4px 0 rgba(184,164,255,.55); }
+.upgrade-grid button:hover, .upgrade-grid button:focus-visible { border-color: var(--cyan); transform: translateY(-2px); }
+.upgrade-grid small { color: #c4d2c8; font: 700 8px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; }
+.result-actions-inline { display: flex; gap: 10px; }
+.weapon-deck { margin-top: 12px; display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.weapon-deck > button { min-height: 82px; padding: 10px; display: grid; grid-template-columns: 46px 1fr; align-items: center; gap: 10px; border: 2px solid #718279; background: #e2e8d9; color: var(--ink); text-align: left; }
+.weapon-deck > button:disabled { cursor: not-allowed; filter: grayscale(1); opacity: .46; }
+.weapon-deck > button.selected { border-color: var(--ink); box-shadow: 4px 4px 0 var(--violet); transform: translateY(-2px); }
+.weapon-deck span { min-width: 0; display: grid; gap: 3px; }
+.weapon-deck small { color: #63756f; font: 800 7px ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: .05em; text-transform: uppercase; }
+.weapon-deck b { font-size: 12px; }
+.weapon-deck em { color: #65746e; font: 700 7px/1.35 ui-monospace, SFMono-Regular, Menlo, monospace; }
+.weapon-mark { position: relative; width: 42px; height: 42px; display: block; background: #14231d; box-shadow: inset 0 0 0 2px rgba(255,255,255,.13); }
+.wisp-bolt .weapon-mark::before { content: ""; position: absolute; left: 7px; top: 18px; width: 25px; height: 6px; background: #a8f0d0; box-shadow: -7px 1px 0 rgba(168,240,208,.35), 18px -3px 0 #f3f0dc; }
+.moon-arc .weapon-mark::before { content: ""; position: absolute; left: 8px; top: 7px; width: 24px; height: 28px; border: 6px solid #b8a4ff; border-right-color: transparent; }
+.beacon-pulse .weapon-mark::before, .beacon-pulse .weapon-mark::after { content: ""; position: absolute; border: 3px solid #ffc38f; }
+.beacon-pulse .weapon-mark::before { inset: 7px; }
+.beacon-pulse .weapon-mark::after { inset: 14px; border-color: var(--cyan); }
+.endless-leaderboard { margin-top: 24px; overflow: hidden; border: 2px solid var(--ink); background: #101915; color: #f3f0dc; box-shadow: 7px 7px 0 rgba(92,246,255,.45); }
+.leaderboard-heading { padding: 16px; display: flex; align-items: end; justify-content: space-between; gap: 18px; border-bottom: 1px solid rgba(226,239,214,.22); }
+.leaderboard-heading span { color: #8fa299; font: 800 7px ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: .1em; text-transform: uppercase; }
+.leaderboard-heading h4 { margin: 4px 0 0; font-size: 18px; }
+.leaderboard-filters { display: flex; gap: 5px; }
+.leaderboard-filters button { min-height: 30px; padding: 0 9px; border: 1px solid #516158; background: transparent; color: #9baca2; font: 800 7px ui-monospace, SFMono-Regular, Menlo, monospace; text-transform: uppercase; }
+.leaderboard-filters button.active { border-color: var(--cyan); background: rgba(92,246,255,.12); color: var(--cyan); }
+.score-submit { padding: 12px 16px; display: grid; grid-template-columns: 1fr auto; gap: 9px; border-bottom: 1px solid rgba(226,239,214,.18); background: rgba(184,164,255,.08); }
+.score-submit label { display: grid; grid-template-columns: auto 1fr; align-items: center; gap: 10px; }
+.score-submit label span { color: #c4d2c8; font: 800 8px ui-monospace, SFMono-Regular, Menlo, monospace; }
+.score-submit input { min-width: 0; height: 38px; padding: 0 10px; border: 1px solid #607168; background: #17251f; color: white; font: 800 10px ui-monospace, SFMono-Regular, Menlo, monospace; }
+.score-submit button { min-height: 38px; padding: 0 14px; border: 1px solid var(--cyan); background: var(--cyan); color: var(--ink); font: 900 8px ui-monospace, SFMono-Regular, Menlo, monospace; text-transform: uppercase; }
+.score-submit-overlay { width: min(650px, 96%); margin: 8px 0 16px; padding: 10px; border: 1px solid rgba(226,239,214,.25); background: rgba(184,164,255,.1); }
+.score-submit-overlay .leaderboard-status { grid-column: 1 / -1; padding: 4px 0 0; border: 0; }
+.score-submit-status { width: min(650px, 96%); margin: 8px 0 16px; border: 1px solid rgba(226,239,214,.2); background: rgba(117,185,52,.1); text-align: center; }
+.leaderboard-status { margin: 0; padding: 9px 16px; border-bottom: 1px solid rgba(226,239,214,.16); color: var(--lime); font: 750 8px ui-monospace, SFMono-Regular, Menlo, monospace; }
+.leaderboard-row { min-height: 48px; padding: 8px 16px; display: grid; grid-template-columns: 50px minmax(0, 1fr) 70px 110px; align-items: center; gap: 10px; border-bottom: 1px solid rgba(226,239,214,.11); font: 800 9px ui-monospace, SFMono-Regular, Menlo, monospace; }
+.leaderboard-row:last-child { border-bottom: 0; }
+.leaderboard-row > span:nth-child(2) { min-width: 0; display: grid; gap: 2px; }
+.leaderboard-row small { overflow: hidden; color: #82938a; font-size: 7px; text-overflow: ellipsis; white-space: nowrap; }
+.leaderboard-row > :last-child { color: var(--lime); text-align: right; }
+.leaderboard-columns { min-height: 32px; background: #1b2b22; color: #7f9187; font-size: 7px; text-transform: uppercase; }
+.leaderboard-empty { padding: 24px 16px; color: #8fa097; font: 750 8px ui-monospace, SFMono-Regular, Menlo, monospace; text-align: center; }
+.leaderboard-more { width: 100%; min-height: 42px; border: 0; border-top: 1px solid rgba(226,239,214,.18); background: #1b2b22; color: var(--cyan); font: 900 8px ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: .08em; text-transform: uppercase; }
+.leaderboard-more:hover { background: #274237; }
+.combat-controls { grid-template-columns: 58px 58px repeat(4, minmax(72px, 1fr)); }
+.game-controls .fire-control { background: var(--lime); font-size: 10px; text-transform: uppercase; }
+.game-controls .weapon-control { overflow: hidden; background: #ffc38f; font-size: 8px; text-overflow: ellipsis; text-transform: uppercase; white-space: nowrap; }
+
+@media (max-width: 900px) {
+  .combat-hud { grid-template-columns: repeat(3, 1fr); }
+  .combat-hud .sound-toggle { min-height: 38px; border-top: 1px solid rgba(226,239,214,.24); }
+}
+
+@media (max-width: 720px) {
+  .combat-hud { grid-template-columns: repeat(2, 1fr); }
+  .combat-hud .sound-toggle { grid-column: auto; }
+  .game-setup-group, .upgrade-grid { grid-template-columns: 1fr; }
+  .weapon-deck { grid-template-columns: 1fr; }
+  .weapon-deck > button { min-height: 66px; }
+  .leaderboard-heading { align-items: flex-start; flex-direction: column; }
+  .score-submit, .score-submit label { grid-template-columns: 1fr; }
+  .leaderboard-row { grid-template-columns: 32px minmax(0, 1fr) 42px 76px; padding-inline: 9px; gap: 6px; font-size: 8px; }
+  .setup-overlay { position: relative; min-height: 540px; }
+  .game-setup-group button { min-height: 50px; }
+  .upgrade-overlay { position: relative; min-height: 460px; }
+  .upgrade-grid button { min-height: 70px; }
+  .combat-controls { grid-template-columns: repeat(3, 1fr); }
+  .combat-controls button { min-width: 0 !important; min-height: 48px; }
+  .result-actions-inline { width: 100%; flex-direction: column; }
+}

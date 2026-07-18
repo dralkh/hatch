@@ -41,9 +41,17 @@ application runtime is required.
 Runtime states are idle, run right, mirrored run left, wave, jump, failed,
 waiting, working and review. The web result view animates every state at once,
 stores completed packages in private IndexedDB history and includes a playable
-keyboard/touch mini-game. The latest 12 pets stay on-device, including imported
-Hatch ZIP packages, and each pet remembers its fastest Beacon Rescue clear
-plus three mastery badges.
+keyboard/touch action game. Beacon Rescue is an authored story course with
+three cleansing tools, enemies, visible difficulty presets and four mastery
+badges. Endless Patrol streams seeded rooms, combat waves, guardians and
+temporary upgrades for as long as the player survives. The latest 12 pets and
+their per-mode records stay on-device.
+
+Endless Patrol also includes a live public leaderboard inside Beacon Wilds.
+After a run, players can submit a 2–20 character display name; scores are shown
+in real time and separated by difficulty. Submissions are an honor system,
+validated and rate-limited through InstantDB, while local records continue to
+work when the network is unavailable.
 
 ### Export for Hermes Agent
 
@@ -52,12 +60,16 @@ contract: an 8×9 grid of 192×208 cells with the same state rows and populated
 frame counts. No frame conversion or additional generation is required.
 
 On the website, choose **Hermes Agent ZIP** after generating a pet, or use the
-same action from a saved pet in local history. The Hermes archive contains only
-`pet.json` and `spritesheet.png`, which can be imported directly:
+same action from a saved pet in local history. The archive contains only
+`pet.json` and `spritesheet.png`, matching the Hermes/Petdex atlas contract.
+Hermes Agent's current CLI installs pets from its gallery; it does not currently
+expose a local ZIP import command.
 
-```sh
-hermes pets import ./my-pet-hermes-pet.zip --select
-```
+Hatch can play existing Hermes pets directly. Choose **Import Hatch / Hermes**
+and provide a minimal Hermes/Petdex ZIP, a complete Hatch ZIP, or a loose
+1536×1872 PNG/WebP atlas. Loose and Hermes imports are normalized to PNG and
+receive a local spark-reveal hatch animation; no image provider or Hatch
+generation run is required.
 
 The CLI defaults to the full Hatch package. Select the minimal Hermes archive,
 or emit both formats from the same generated frames:

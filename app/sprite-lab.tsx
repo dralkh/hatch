@@ -633,6 +633,64 @@ async function imageDimensions(blob: Blob) {
   }
 }
 
+async function normalizeImportedAtlas(blob: Blob) {
+  const dimensions = await imageDimensions(blob);
+  if (dimensions.width !== PET_WIDTH || dimensions.height !== PET_HEIGHT) {
+    throw new Error("The pet atlas must be exactly 1536×1872 (8×9 cells of 192×208).");
+  }
+  const url = URL.createObjectURL(blob);
+  try {
+    const image = await loadImage(url);
+    const canvas = document.createElement("canvas");
+    canvas.width = PET_WIDTH;
+    canvas.height = PET_HEIGHT;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) throw new Error("Canvas import is unavailable.");
+    ctx.imageSmoothingEnabled = false;
+    ctx.drawImage(image, 0, 0, PET_WIDTH, PET_HEIGHT);
+    return canvasBlob(canvas);
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}
+
+async function composeImportedHatch(petBlob: Blob) {
+  const url = URL.createObjectURL(petBlob);
+  try {
+    const image = await loadImage(url);
+    const canvas = document.createElement("canvas");
+    canvas.width = PET_WIDTH;
+    canvas.height = HATCH_HEIGHT;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) throw new Error("Canvas hatch synthesis is unavailable.");
+    ctx.imageSmoothingEnabled = false;
+    for (let frame = 0; frame < 24; frame += 1) {
+      const ox = frame % COLS * CELL_W;
+      const oy = Math.floor(frame / COLS) * CELL_H;
+      const reveal = Math.max(0, Math.min(1, (frame - 3) / 16));
+      const eased = 1 - (1 - reveal) ** 3;
+      const scale = 0.58 + eased * 0.42;
+      const lift = Math.sin(reveal * Math.PI) * 35;
+      const width = CELL_W * scale;
+      const height = CELL_H * scale;
+      for (let particle = 0; particle < 12; particle += 1) {
+        const angle = particle * 2.399 + 0.25;
+        const radius = 12 + reveal * (32 + particle % 4 * 8);
+        const size = 2 + particle % 3;
+        ctx.globalAlpha = Math.sin(reveal * Math.PI) * 0.85;
+        ctx.fillStyle = particle % 2 ? "#a8ff4f" : "#5cf6ff";
+        ctx.fillRect(ox + CELL_W / 2 + Math.cos(angle) * radius, oy + 125 + Math.sin(angle) * radius * 0.7, size, size);
+      }
+      ctx.globalAlpha = eased;
+      ctx.drawImage(image, 0, 0, CELL_W, CELL_H, ox + (CELL_W - width) / 2, oy + CELL_H - height - lift, width, height);
+      ctx.globalAlpha = 1;
+    }
+    return canvasBlob(canvas);
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}
+
 function assertManifestContract(manifest: Record<string, unknown>) {
   if (manifest.schema !== "sprite-pet/v1") throw new Error("The package does not use the sprite-pet/v1 manifest contract.");
   const assets = manifest.assets as Record<string, unknown> | undefined;
@@ -648,47 +706,75 @@ function assertManifestContract(manifest: Record<string, unknown>) {
 async function importPetPackage(file: File): Promise<SavedPet> {
   const MAX_ZIP_BYTES = 25 * 1024 * 1024;
   const MAX_UNPACKED_BYTES = 64 * 1024 * 1024;
-  if (!file.name.toLowerCase().endsWith(".zip")) throw new Error("Choose a Hatch ZIP package.");
-  if (file.size > MAX_ZIP_BYTES) throw new Error("The ZIP is larger than the 25 MB import limit.");
-  let files: Record<string, Uint8Array>;
+  if (file.size > MAX_ZIP_BYTES) throw new Error("The selected file is larger than the 25 MB import limit.");
+  const lowerName = file.name.toLowerCase();
+  const isZip = lowerName.endsWith(".zip");
+  const isLooseAtlas = lowerName.endsWith(".png") || lowerName.endsWith(".webp");
+  if (!isZip && !isLooseAtlas) throw new Error("Choose a Hatch/Hermes ZIP or a PNG/WebP pet atlas.");
+  let metadata: Record<string, unknown> = {};
+  let manifest: Record<string, unknown> = {};
+  let petSource: Blob;
+  let hatchBlob: Blob | undefined;
+  let hatchSource = "local spark reveal from Hermes idle frame";
+
+  if (isLooseAtlas) {
+    petSource = file;
+  } else {
+    let files: Record<string, Uint8Array>;
+    try {
+      files = unzipSync(new Uint8Array(await file.arrayBuffer()));
+    } catch {
+      throw new Error("The selected file could not be opened as a ZIP package.");
+    }
+    const names = Object.keys(files);
+    if (names.some((name) => name.replace(/\\/g, "/").split("/").includes("..") || name.startsWith("/") || /^[a-z]:/i.test(name))) {
+      throw new Error("The ZIP contains an unsafe path.");
+    }
+    const entries = Object.values(files);
+    if (entries.length > 64 || entries.reduce((total, entry) => total + entry.byteLength, 0) > MAX_UNPACKED_BYTES) throw new Error("The unpacked package is too large.");
+    const manifestBytes = findPackageEntry(files, "manifest.json", false);
+    const metadataBytes = findPackageEntry(files, "pet.json", false);
+    metadata = metadataBytes ? readJsonFile(metadataBytes, "pet.json") : {};
+
+    if (manifestBytes) {
+      manifest = readJsonFile(manifestBytes, "manifest.json");
+      assertManifestContract(manifest);
+      const petBytes = findPackageEntry(files, "spritesheet.png");
+      const hatchBytes = findPackageEntry(files, "hatch.png");
+      if (!petBytes || !hatchBytes) throw new Error("The Hatch package is incomplete.");
+      petSource = new Blob([petBytes.buffer.slice(petBytes.byteOffset, petBytes.byteOffset + petBytes.byteLength) as ArrayBuffer], { type: "image/png" });
+      hatchBlob = new Blob([hatchBytes.buffer.slice(hatchBytes.byteOffset, hatchBytes.byteOffset + hatchBytes.byteLength) as ArrayBuffer], { type: "image/png" });
+      const hatchSize = await imageDimensions(hatchBlob).catch(() => { throw new Error("The Hatch atlas is not a readable image."); });
+      if (hatchSize.width !== PET_WIDTH || hatchSize.height !== HATCH_HEIGHT) throw new Error("The Hatch atlas must be exactly 1536×624.");
+      hatchSource = "imported Hatch package";
+    } else {
+      if (!metadataBytes) throw new Error("A Hermes ZIP must contain pet.json.");
+      const rawPath = metadata.spritesheetPath;
+      if (typeof rawPath !== "string" || !rawPath.trim()) throw new Error("pet.json is missing spritesheetPath.");
+      const normalizedPath = rawPath.replace(/\\/g, "/");
+      if (normalizedPath.startsWith("/") || normalizedPath.split("/").includes("..") || /^[a-z]:/i.test(normalizedPath)) throw new Error("pet.json contains an unsafe spritesheetPath.");
+      const basename = normalizedPath.split("/").filter(Boolean).at(-1) ?? "";
+      if (!/\.png$|\.webp$/i.test(basename)) throw new Error("Hermes spritesheetPath must reference a PNG or WebP atlas.");
+      const petBytes = findPackageEntry(files, basename);
+      if (!petBytes) throw new Error(`The package is missing ${basename}.`);
+      petSource = new Blob([petBytes.buffer.slice(petBytes.byteOffset, petBytes.byteOffset + petBytes.byteLength) as ArrayBuffer], { type: /\.webp$/i.test(basename) ? "image/webp" : "image/png" });
+    }
+  }
+
+  let petBlob: Blob;
   try {
-    files = unzipSync(new Uint8Array(await file.arrayBuffer()));
-  } catch {
-    throw new Error("The selected file could not be opened as a ZIP package.");
+    petBlob = await normalizeImportedAtlas(petSource);
+  } catch (cause) {
+    throw new Error(cause instanceof Error ? cause.message : "The pet atlas is not a readable image.");
   }
-  const entries = Object.values(files);
-  if (entries.length > 64 || entries.reduce((total, entry) => total + entry.byteLength, 0) > MAX_UNPACKED_BYTES) {
-    throw new Error("The unpacked package is too large.");
-  }
-  const manifestBytes = findPackageEntry(files, "manifest.json");
-  const petBytes = findPackageEntry(files, "spritesheet.png");
-  const hatchBytes = findPackageEntry(files, "hatch.png");
-  const metadataBytes = findPackageEntry(files, "pet.json", false);
-  if (!manifestBytes || !petBytes || !hatchBytes) throw new Error("The package is incomplete.");
-  const manifest = readJsonFile(manifestBytes, "manifest.json");
-  assertManifestContract(manifest);
-  const metadata = metadataBytes ? readJsonFile(metadataBytes, "pet.json") : {};
-  const petBuffer = petBytes.buffer.slice(petBytes.byteOffset, petBytes.byteOffset + petBytes.byteLength) as ArrayBuffer;
-  const hatchBuffer = hatchBytes.buffer.slice(hatchBytes.byteOffset, hatchBytes.byteOffset + hatchBytes.byteLength) as ArrayBuffer;
-  const petBlob = new Blob([petBuffer], { type: "image/png" });
-  const hatchBlob = new Blob([hatchBuffer], { type: "image/png" });
-  let petSize: { width: number; height: number };
-  let hatchSize: { width: number; height: number };
-  try {
-    [petSize, hatchSize] = await Promise.all([imageDimensions(petBlob), imageDimensions(hatchBlob)]);
-  } catch {
-    throw new Error("One of the package atlases is not a readable image.");
-  }
-  if (petSize.width !== PET_WIDTH || petSize.height !== PET_HEIGHT || hatchSize.width !== PET_WIDTH || hatchSize.height !== HATCH_HEIGHT) {
-    throw new Error("The package PNG dimensions do not match the manifest.");
-  }
-  const rawDescription = typeof metadata.description === "string" ? metadata.description : typeof metadata.displayName === "string" ? metadata.displayName : typeof manifest.description === "string" ? manifest.description : file.name.replace(/\.zip$/i, "");
+  hatchBlob ??= await composeImportedHatch(petBlob);
+  const rawDescription = typeof metadata.description === "string" ? metadata.description : typeof metadata.displayName === "string" ? metadata.displayName : typeof manifest.description === "string" ? manifest.description : file.name.replace(/\.(zip|png|webp)$/i, "");
   const description = rawDescription.trim().replace(/\s+/g, " ").slice(0, 900) || "Imported sprite pet";
   return {
     id: crypto.randomUUID(), description, createdAt: new Date().toISOString(), petBlob, hatchBlob,
     artStyle: isArtStyle(metadata.artStyle) ? metadata.artStyle : undefined,
     provider: isProviderId(metadata.provider) ? metadata.provider : undefined,
-    source: "imported", hatchSource: "imported Hatch package",
+    source: "imported", hatchSource,
   };
 }
 
@@ -1394,7 +1480,7 @@ export default function SpriteLab() {
     </div>
     <section className="playground-panel" ref={gameSectionRef} aria-labelledby="playground-heading">
       <div className="panel-heading">
-        <div><span>Playable proof</span><h3 id="playground-heading">Beacon Rescue</h3></div>
+        <div><span>Playable proof</span><h3 id="playground-heading">Beacon Wilds</h3></div>
         {playablePet && <p>Playing as <strong>{playablePet.description}</strong></p>}
       </div>
       {playablePet ? (
@@ -1402,8 +1488,8 @@ export default function SpriteLab() {
       ) : (
         <div className="empty-playground">
           <strong>Hatch or import a pet to play.</strong>
-          <p>Your sprite will run, jump and celebrate using its generated atlas.</p>
-          <button type="button" onClick={openImporter}>Import Hatch ZIP</button>
+          <p>Your sprite can explore the story or fight through a seeded endless patrol.</p>
+          <button type="button" onClick={openImporter}>Import Hatch / Hermes pet</button>
         </div>
       )}
     </section>
@@ -1411,8 +1497,8 @@ export default function SpriteLab() {
     <section className="history-panel" aria-labelledby="history-heading">
       <div className="panel-heading history-heading">
         <div><span>Private · this browser only</span><h3 id="history-heading">Your hatch history</h3></div>
-        <button type="button" className="import-button" onClick={openImporter} disabled={importing}>{importing ? "Importing…" : "Import Hatch ZIP"}</button>
-        <input ref={importInputRef} className="visually-hidden" type="file" accept=".zip,application/zip" onChange={(event) => handleImport(event.target.files?.[0])} />
+        <button type="button" className="import-button" onClick={openImporter} disabled={importing}>{importing ? "Importing…" : "Import Hatch / Hermes"}</button>
+        <input ref={importInputRef} className="visually-hidden" type="file" accept=".zip,.png,.webp,application/zip,image/png,image/webp" onChange={(event) => handleImport(event.target.files?.[0])} />
       </div>
       {historyMessage && <div className="history-message" role="status">{historyMessage}</div>}
       {savedPets.length ? (
@@ -1423,7 +1509,7 @@ export default function SpriteLab() {
               <div className="history-card-copy">
                 <span>{pet.source === "imported" ? "Imported" : "Generated"}{pet.provider ? ` via ${pet.provider === "comfyui" ? "ComfyUI" : pet.provider === "invoke" ? "InvokeAI" : "fal"}` : ""} · {new Date(pet.createdAt).toLocaleDateString()}</span>
                 <h4>{pet.description}</h4>
-                <p>Beacon Rescue <strong>{pet.gameRecord?.levelVersion === GAME_LEVEL_VERSION ? formatTime(pet.gameRecord.bestTimeMs) : "Not cleared"}</strong> · {pet.gameRecord?.levelVersion === GAME_LEVEL_VERSION ? pet.gameRecord.badges.length : 0}/3 badges</p>
+                <p>Story <strong>{pet.gameRecord?.levelVersion === GAME_LEVEL_VERSION ? formatTime(pet.gameRecord.story.adventure?.bestTimeMs) : "Not cleared"}</strong> · Endless <strong>{pet.gameRecord?.levelVersion === GAME_LEVEL_VERSION ? `${pet.gameRecord.endless.adventure?.bestRooms ?? 0} rooms` : "Not played"}</strong></p>
               </div>
               <div className="history-card-actions">
                 <button type="button" className="history-play" onClick={() => selectPetForPlay(pet)}>Play</button>

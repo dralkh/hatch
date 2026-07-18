@@ -39,6 +39,7 @@
     "lint": "eslint . --ignore-pattern dist --ignore-pattern .next --max-warnings=0"
   },
   "dependencies": {
+    "@instantdb/react": "^1.0.49",
     "fflate": "^0.8.2",
     "next": "16.2.6",
     "react": "19.2.6",
